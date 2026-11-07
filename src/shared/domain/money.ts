@@ -12,8 +12,8 @@ export class Money {
     private static readonly CURRENCY_PATTERN = /^[A-Z]{3}$/;
 
     private constructor(
-       private readonly cents: bigint,
-       private readonly currency: string,
+        private readonly cents: bigint,
+        public readonly currency: string,
     ) {}
 
     static from(props: MoneyProps): Money {
