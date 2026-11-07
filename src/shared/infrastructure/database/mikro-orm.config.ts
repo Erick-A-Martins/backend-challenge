@@ -11,5 +11,6 @@ export default defineConfig({
     extensions: [Migrator],
     migrations: {
         path: "./migrations",
+        snapshot: false,
     },
 });
