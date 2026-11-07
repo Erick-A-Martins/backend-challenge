@@ -1,6 +1,6 @@
 import { Money } from "../../shared/domain/money.ts";
 import {InvalidLedgerEntryError} from "../../shared/domain/errors/invalid-ledger-entry.error.ts";
-import {LedgerDirection} from "./ledger-direction.ts";
+import {LedgerDirection} from "./enums/ledger-direction.ts";
 
 export interface LedgerEntryState {
     id: string;

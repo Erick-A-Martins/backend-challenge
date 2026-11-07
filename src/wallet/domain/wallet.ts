@@ -3,7 +3,7 @@ import {WalletLedgerEntry} from "./wallet-ledger-entry.ts";
 import {CurrencyMismatchError} from "../../shared/domain/errors/currency-mismatch.error.ts";
 import {InvalidMovementError} from "../../shared/domain/errors/invalid-movement.error.ts";
 import {InsufficientFundsError} from "../../shared/domain/errors/insufficient-funds.error.ts";
-import {LedgerDirection} from "./ledger-direction.ts";
+import {LedgerDirection} from "./enums/ledger-direction.ts";
 
 export interface WalletState {
     id: string;

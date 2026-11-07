@@ -2,7 +2,7 @@ import { Money } from "../../../src/shared/domain/money.ts";
 import { Wallet } from "../../../src/wallet/domain/wallet.ts";
 import { describe, expect, test } from "bun:test";
 import { InvalidMovementError } from "../../../src/shared/domain/errors/invalid-movement.error.ts";
-import { LedgerDirection } from "../../../src/wallet/domain/ledger-direction.ts";
+import { LedgerDirection } from "../../../src/wallet/domain/enums/ledger-direction.ts";
 import { CurrencyMismatchError } from "../../../src/shared/domain/errors/currency-mismatch.error.ts";
 import { InsufficientFundsError } from "../../../src/shared/domain/errors/insufficient-funds.error.ts";
 

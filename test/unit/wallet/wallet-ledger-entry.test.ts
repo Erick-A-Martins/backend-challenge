@@ -1,7 +1,7 @@
 import { Money } from "../../../src/shared/domain/money.ts";
 import { describe, expect, test } from "bun:test";
 import { WalletLedgerEntry } from "../../../src/wallet/domain/wallet-ledger-entry.ts";
-import { LedgerDirection } from "../../../src/wallet/domain/ledger-direction.ts";
+import { LedgerDirection } from "../../../src/wallet/domain/enums/ledger-direction.ts";
 import { InvalidLedgerEntryError } from "../../../src/shared/domain/errors/invalid-ledger-entry.error.ts";
 
 const brl = (amount: string) => Money.from({amount, currency: "BRL"});
