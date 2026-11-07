@@ -2,12 +2,14 @@ import "reflect-metadata";
 import { defineConfig } from "@mikro-orm/postgresql";
 import { ReflectMetadataProvider } from "@mikro-orm/decorators/legacy";
 import { Migrator } from "@mikro-orm/migrations";
+import { WalletRecord } from "../../../wallet/infrastructure/persistence/wallet.record";
+import { WagerTransactionRecord } from "../../../wagering/infrastructure/persistence/wager-transaction.record";
+import { WalletLedgerEntryRecord } from "../../../wallet/infrastructure/persistence/wallet-ledger-entry.record";
 
 export default defineConfig({
     clientUrl: process.env.DATABASE_URL,
     metadataProvider: ReflectMetadataProvider,
-    entities: [],
-    discovery: { warnWhenNoEntities: false }, // remover depois de ter entidade
+    entities: [WalletRecord, WagerTransactionRecord, WalletLedgerEntryRecord],
     extensions: [Migrator],
     migrations: {
         path: "./migrations",
