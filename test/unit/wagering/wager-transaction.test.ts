@@ -131,6 +131,17 @@ describe("consultas de dominio", () => {
         expect(tx.matchesPayload("hash-1")).toBe(true);
         expect(tx.matchesPayload("hash-OTHER")).toBe(false);
     });
+
+    test("providerId 'system' é reservado", () => {
+        expect(() => make({ providerId: "system" })).toThrow(InvalidTransactionError);
+    });
+
+    test("registra o saldo observado", () => {
+        const tx = make();
+        expect(tx.observedBalance).toBeUndefined();
+        tx.recordObservedBalance(brl("70.00"));
+        expect(tx.observedBalance?.toString()).toBe("70.00");
+    });
 });
 
 describe("ledgerDirectionFor", () => {

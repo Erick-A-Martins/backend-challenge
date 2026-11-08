@@ -5,9 +5,15 @@ import { InvalidMoneyError } from "../../domain/errors/invalid-money.error";
 import { InvalidRequestError } from "../../domain/errors/invalid-request.error";
 import { WalletAlreadyExistsError } from "../../../wallet/domain/errors/wallet-already-exists.error";
 import { WalletNotFoundError } from "../../../wallet/domain/errors/wallet-not-found.error";
+import {InvalidTransactionError} from "../../../wagering/domain/errors/invalid-transaction.error.ts";
+import {TransactionNotFoundError} from "../../../wagering/domain/errors/transaction-not-found.error.ts";
+import {IdempotencyConflictError} from "../../../wagering/domain/errors/idempotency-conflict.error.ts";
+import {DuplicateTransactionError} from "../../../wagering/domain/errors/duplicate-transaction.error.ts";
+import {isTransientDatabaseError} from "../../infrastructure/database/transient-database-error.ts";
 
 interface ResponseLike {
     status(code: number): { json(body: unknown): unknown };
+    setHeader(name: string, value: string): unknown;
 }
 
 interface ErrorMapping {
@@ -15,11 +21,17 @@ interface ErrorMapping {
     code: string;
 }
 
-const DOMAIN_ERROR_MAPPINGS: ReadonlyArray<readonly [abstract new (...args: never[]) => DomainError, ErrorMapping]> = [
+const DOMAIN_ERROR_MAPPINGS: ReadonlyArray<
+    readonly [abstract new (...args: never[]) => DomainError, ErrorMapping]
+> = [
     [InvalidRequestError, { status: 400, code: "INVALID_REQUEST" }],
     [InvalidMoneyError, { status: 400, code: "INVALID_MONEY" }],
+    [InvalidTransactionError, { status: 400, code: "INVALID_TRANSACTION" }],
     [WalletNotFoundError, { status: 404, code: "WALLET_NOT_FOUND" }],
+    [TransactionNotFoundError, { status: 404, code: "TRANSACTION_NOT_FOUND" }],
     [WalletAlreadyExistsError, { status: 409, code: "WALLET_ALREADY_EXISTS" }],
+    [IdempotencyConflictError, { status: 409, code: "IDEMPOTENCY_CONFLICT" }],
+    [DuplicateTransactionError, { status: 409, code: "DUPLICATE_TRANSACTION" }],
     [CurrencyMismatchError, { status: 422, code: "CURRENCY_MISMATCH" }],
 ];
 
@@ -50,6 +62,13 @@ export class HttpExceptionFilter implements ExceptionFilter {
                 response.status(mapping.status).json(errorBody(mapping.code, exception.message));
                 return;
             }
+        }
+
+        if (isTransientDatabaseError(exception)) {
+            this.logger.warn("Transient database failure; client should retry");
+            response.setHeader("Retry-After", "1");
+            response.status(503).json(errorBody("SERVICE_UNAVAILABLE", "Temporarily unavailable, retry shortly"));
+            return;
         }
 
         this.logger.error(

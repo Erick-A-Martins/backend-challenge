@@ -11,6 +11,8 @@ import type { WalletLedgerRepository } from "../../../src/wallet/domain/wallet-l
 import { MikroOrmWalletLedgerRepository } from "../../../src/wallet/infrastructure/persistence/mikro-orm-wallet-ledger.repository";
 import { MikroOrmWalletRepository } from "../../../src/wallet/infrastructure/persistence/mikro-orm-wallet.repository";
 import { query } from "./test-database";
+import { Sha256Hasher } from "../../../src/shared/infrastructure/sha256-hasher";
+import { expect } from "bun:test";
 
 export const AT = new Date("2026-01-01T12:00:00.000Z");
 
@@ -30,7 +32,7 @@ export function buildUseCases(orm: MikroORM, ledger?: WalletLedgerRepository) {
 
     return {
         createWallet: new CreateWalletUseCase(unitOfWork, wallets, transactions, ledgerRepository, clock, ids),
-        submit: new SubmitWagerTransactionUseCase(unitOfWork, wallets, ledgerRepository, transactions, clock, ids),
+        submit: new SubmitWagerTransactionUseCase(unitOfWork, wallets, ledgerRepository, transactions, new Sha256Hasher(), clock, ids),
     };
 }
 
@@ -58,7 +60,6 @@ export function cmd(
         providerId,
         externalTransactionId: external,
         idempotencyKey: `${providerId}:${external}`,
-        payloadHash: `hash:${external}`,
         playerId: options.playerId ?? wallet.playerId,
         walletId: wallet.id,
         roundId: options.roundId ?? "round-1",
@@ -100,3 +101,8 @@ export const transactionRow = async (orm: MikroORM, externalTransactionId: strin
 
 export const rowCount = async (orm: MikroORM, table: "wallets" | "wager_transactions" | "wallet_ledger_entries") =>
     (await query<{ n: number }>(orm, `select count(*)::int as n from ${table}`))[0]?.n;
+
+export const expectConsistent = async (orm: MikroORM, walletId: string, balance: string) => {
+    expect((await walletState(orm, walletId))?.balance).toBe(balance);
+    expect(await ledgerTotal(orm, walletId)).toBe(balance);
+};

@@ -42,4 +42,17 @@ export class MikroOrmWagerTransactionRepository extends WagerTransactionReposito
         });
         return count > 0;
     }
+
+    override async findById(id: string): Promise<WagerTransaction | null> {
+        const record = await this.em.findOne(WagerTransactionRecord, { id });
+        return record ? toWagerTransaction(record) : null;
+    }
+
+    override async findByProviderAndIdempotencyKey(
+        providerId: string,
+        idempotencyKey: string,
+    ): Promise<WagerTransaction | null> {
+        const record = await this.em.findOne(WagerTransactionRecord, { providerId, idempotencyKey });
+        return record ? toWagerTransaction(record) : null;
+    }
 }

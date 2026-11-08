@@ -7,6 +7,10 @@ import type { WagerTransactionStatus } from "../../domain/enums/wager-transactio
 import type { FailureCode } from "../../domain/enums/failure-code";
 
 export function toWagerTransactionRecord(tx: WagerTransaction): RequiredEntityData<WagerTransactionRecord> {
+    const observed = tx.observedBalance;
+    if (observed === undefined) {
+        throw new Error(`Transaction ${tx.id} has no observed balance: record it before persisting`);
+    }
     return {
         id: tx.id,
         providerId: tx.providerId,
@@ -28,6 +32,8 @@ export function toWagerTransactionRecord(tx: WagerTransaction): RequiredEntityDa
         referenceAttempts: tx.referenceAttempts,
         nextAttemptAt: tx.nextAttemptAt ?? null,
         createdAt: tx.createdAt,
+        observedBalance: observed.toString(),
+        observedBalanceCurrency: observed.currency,
     };
 }
 
@@ -52,5 +58,6 @@ export function toWagerTransaction(record: WagerTransactionRecord): WagerTransac
         processedAt: record.processedAt ?? undefined,
         referenceAttempts: record.referenceAttempts,
         nextAttemptAt: record.nextAttemptAt ?? undefined,
+        observedBalance: Money.from({ amount: record.observedBalance, currency: record.observedBalanceCurrency }),
     });
 }

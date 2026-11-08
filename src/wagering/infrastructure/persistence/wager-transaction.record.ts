@@ -61,4 +61,10 @@ export class WagerTransactionRecord {
 
     @Property({ type: "Date", columnType: "timestamptz" })
     createdAt!: Date;
+
+    @Property({ type: 'string', columnType: 'numeric(19,2)' })
+    observedBalance!: string;
+
+    @Property({ type: 'string', columnType: 'varchar(3)' })
+    observedBalanceCurrency!: string;
 }

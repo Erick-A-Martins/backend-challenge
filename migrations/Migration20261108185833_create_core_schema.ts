@@ -46,6 +46,8 @@ export class Migration20261108185833_create_core_schema extends Migration {
         processed_at                      timestamptz,
         reference_attempts                integer       not null default 0,
         next_attempt_at                   timestamptz,
+        observed_balance                  numeric(19,2) not null,
+        observed_balance_currency         varchar(3)    not null,
         created_at                        timestamptz   not null,
 
         constraint wager_tx_provider_external_uq    unique (provider_id, external_transaction_id),
@@ -63,6 +65,8 @@ export class Migration20261108185833_create_core_schema extends Migration {
         constraint wager_tx_amount_non_negative_ck check (amount >= 0),
         constraint wager_tx_currency_format_ck     check (currency ~ '^[A-Z]{3}$'),
         constraint wager_tx_attempts_ck            check (reference_attempts >= 0),
+        constraint wager_tx_observed_balance_ck    check (observed_balance >= 0),
+        constraint wager_tx_observed_currency_ck   check (observed_balance_currency ~ '^[A-Z]{3}$'),
 
         -- REFUND e ROLLBACK exigem referência
         constraint wager_tx_reference_required_ck

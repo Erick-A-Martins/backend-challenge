@@ -50,7 +50,9 @@ export class CreateWalletUseCase {
                     money: initialBalance,
                     createdAt: now,
                 });
+
                 opening.markProcessed(undefined, now);
+                opening.recordObservedBalance(wallet.balance);
 
                 const entry = WalletLedgerEntry.create({
                     id: this.ids.next(),

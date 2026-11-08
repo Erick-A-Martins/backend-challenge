@@ -39,6 +39,7 @@ export interface WagerTransactionState extends CreateWagerTransactionProps {
     processedAt?: Date;
     referenceAttempts: number;
     nextAttemptAt?: Date;
+    observedBalance?: Money;
 }
 
 const ALLOWED_REFERENCE_KINDS: Readonly<Record<WagerTransactionKind, readonly WagerTransactionKind[]>> = {
@@ -75,6 +76,7 @@ export class WagerTransaction {
         private _processedAt: Date | undefined,
         private _referenceAttempts: number,
         private _nextAttemptAt: Date | undefined,
+        private _observedBalance: Money | undefined,
     ) {}
 
     /** Nasce em PENDING. Valida a exigência de referência por kind. */
@@ -82,7 +84,9 @@ export class WagerTransaction {
         if (props.kind === WagerTransactionKind.Opening) {
             throw new InvalidTransactionError("OPENING is internal and cannot be submitted");
         }
-
+        if (props.providerId === SYSTEM_PROVIDER_ID) {
+            throw new InvalidTransactionError(`providerId "${SYSTEM_PROVIDER_ID}" is reserved`);
+        }
         return WagerTransaction.createValidated(props);
     };
 
@@ -124,6 +128,7 @@ export class WagerTransaction {
             state.processedAt,
             state.referenceAttempts,
             state.nextAttemptAt,
+            state.observedBalance,
         );
     };
 
@@ -149,6 +154,10 @@ export class WagerTransaction {
 
     get nextAttemptAt(): Date | undefined {
         return this._nextAttemptAt;
+    }
+
+    get observedBalance(): Money | undefined {
+        return this._observedBalance;
     }
 
     // ---- transições (lançam InvalidTransactionStateError se o estado atual for terminal)
@@ -205,6 +214,10 @@ export class WagerTransaction {
     matchesPayload(payloadHash: string): boolean {
         return this.payloadHash === payloadHash;
     };
+
+    recordObservedBalance(balance: Money): void {
+        this._observedBalance = balance;
+    }
 
     ledgerDirectionFor(reference?: WagerTransaction): LedgerDirection {
         switch (this.kind) {
@@ -315,6 +328,7 @@ export class WagerTransaction {
             undefined,
             undefined,
             0,
+            undefined,
             undefined,
         );
     }
