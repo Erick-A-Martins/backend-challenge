@@ -8,7 +8,7 @@ export interface MoneyProps {
 
 export class Money {
 
-    private static readonly AMOUNT_PATTERN = /^\d+(\.\d{1,2})?$/;
+    private static readonly AMOUNT_PATTERN = /^\d{1,15}(\.\d{1,2})?$/;
     private static readonly CURRENCY_PATTERN = /^[A-Z]{3}$/;
 
     private constructor(
@@ -22,7 +22,7 @@ export class Money {
 
         if (typeof amount !== "string" || !Money.AMOUNT_PATTERN.test(amount)) {
             throw new InvalidMoneyError(
-                "Amount must be a non-negative decimal string with at most 2 decimal places"
+                "Amount must be a non-negative decimal string with at most 15 integer digits and 2 decimal places"
             );
         }
 

@@ -2,9 +2,9 @@ import { Injectable } from "@nestjs/common";
 import { UniqueConstraintViolationException } from "@mikro-orm/core";
 import { EntityManager } from "@mikro-orm/postgresql";
 import { WalletAlreadyExistsError } from "../../domain/errors/wallet-already-exists.error";
-import type { Wallet } from "../../domain/wallet";
+import { Wallet } from "../../domain/wallet";
 import { WalletRepository } from "../../domain/wallet.repository";
-import { toWalletRecord } from "./wallet.mapper";
+import { toWallet, toWalletRecord } from "./wallet.mapper";
 import { WalletRecord } from "./wallet.record";
 
 @Injectable()
@@ -24,5 +24,10 @@ export class MikroOrmWalletRepository extends WalletRepository {
 
             throw error;
         }
+    }
+
+    override async findById(id: string): Promise<Wallet | null> {
+        const record = await this.em.findOne(WalletRecord, { id });
+        return record ? toWallet(record) : null;
     }
 }

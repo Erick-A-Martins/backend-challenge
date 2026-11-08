@@ -1,7 +1,7 @@
 import { MikroORM } from "@mikro-orm/postgresql";
 import config from "../../../src/shared/infrastructure/database/mikro-orm.config";
 
-const TEST_DATABASE_URL =
+export const TEST_DATABASE_URL =
     process.env["TEST_DATABASE_URL"] ?? "postgres://wallet:wallet@localhost:5432/wallet_test";
 
 export async function createTestOrm(): Promise<MikroORM> {

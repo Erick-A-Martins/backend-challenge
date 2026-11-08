@@ -39,7 +39,7 @@ describe("testa Money.from", () => {
 describe("testa Money aritméticamente", () => {
 
     test("nao perde precisao com valores altos", () => {
-        expect(brl("9999999999999999.99").add(brl("0.01")).toString()).toBe("10000000000000000.00");
+        expect(brl("999999999999999.99").add(brl("0.01")).toString()).toBe("1000000000000000.00");
     });
 
     test("0.10 + 0.20 = 0.30", () => {
