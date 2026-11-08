@@ -1,9 +1,12 @@
 import { Module } from "@nestjs/common";
-import { WagerTransactionRepository } from "./domain/wager-transaction.repository";
-import { MikroOrmWagerTransactionRepository } from "./infrastructure/persistence/mikro-orm-wager-transaction.repository";
+import { SharedModule } from "../shared/shared.module.ts";
+import { WalletModule } from "../wallet/wallet.module.ts";
+import { WagerPersistenceModule } from "./wager-persistence.module.ts";
+import { SubmitWagerTransactionUseCase } from "./application/submit-wager-transaction.use-case.ts";
 
 @Module({
-    providers: [{ provide: WagerTransactionRepository, useClass: MikroOrmWagerTransactionRepository }],
-    exports: [WagerTransactionRepository],
+    imports: [SharedModule, WalletModule, WagerPersistenceModule],
+    providers: [SubmitWagerTransactionUseCase],
+    exports: [SubmitWagerTransactionUseCase],
 })
 export class WageringModule {}

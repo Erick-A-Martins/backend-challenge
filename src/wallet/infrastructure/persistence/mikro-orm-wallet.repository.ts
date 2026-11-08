@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { UniqueConstraintViolationException } from "@mikro-orm/core";
+import { LockMode, UniqueConstraintViolationException } from "@mikro-orm/core";
 import { EntityManager } from "@mikro-orm/postgresql";
 import { WalletAlreadyExistsError } from "../../domain/errors/wallet-already-exists.error";
 import { Wallet } from "../../domain/wallet";
@@ -29,5 +29,22 @@ export class MikroOrmWalletRepository extends WalletRepository {
     override async findById(id: string): Promise<Wallet | null> {
         const record = await this.em.findOne(WalletRecord, { id });
         return record ? toWallet(record) : null;
+    }
+
+    override async findByIdForUpdate(id: string): Promise<Wallet | null> {
+        const record = await this.em.findOne(WalletRecord, { id }, { lockMode: LockMode.PESSIMISTIC_WRITE });
+        return record ? toWallet(record) : null;
+    }
+
+    override async update(wallet: Wallet): Promise<void> {
+        await this.em.nativeUpdate(
+            WalletRecord,
+            { id: wallet.id },
+            {
+                balance: wallet.balance.toString(),
+                version: wallet.version,
+                updatedAt: wallet.updatedAt,
+            },
+        );
     }
 }

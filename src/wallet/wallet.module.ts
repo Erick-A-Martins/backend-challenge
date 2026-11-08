@@ -1,6 +1,5 @@
 import { Module } from "@nestjs/common";
 import { SharedModule } from "../shared/shared.module";
-import { WageringModule } from "../wagering/wagering.module";
 import { CreateWalletUseCase } from "./application/create-wallet.use-case";
 import { WalletLedgerRepository } from "./domain/wallet-ledger.repository";
 import { WalletRepository } from "./domain/wallet.repository";
@@ -8,9 +7,10 @@ import { MikroOrmWalletLedgerRepository } from "./infrastructure/persistence/mik
 import { MikroOrmWalletRepository } from "./infrastructure/persistence/mikro-orm-wallet.repository";
 import { GetWalletUseCase } from "./application/get-wallet.use-case";
 import { WalletController } from "./interface/http/wallet.controller";
+import { WagerPersistenceModule } from "../wagering/wager-persistence.module.ts";
 
 @Module({
-    imports: [SharedModule, WageringModule],
+    imports: [SharedModule, WagerPersistenceModule],
     controllers: [WalletController],
     providers: [
         { provide: WalletRepository, useClass: MikroOrmWalletRepository },
@@ -18,6 +18,6 @@ import { WalletController } from "./interface/http/wallet.controller";
         CreateWalletUseCase,
         GetWalletUseCase,
     ],
-    exports: [CreateWalletUseCase, GetWalletUseCase],
+    exports: [CreateWalletUseCase, GetWalletUseCase, WalletRepository, WalletLedgerRepository],
 })
 export class WalletModule {}

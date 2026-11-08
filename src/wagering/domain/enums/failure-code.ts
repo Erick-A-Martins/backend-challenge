@@ -9,4 +9,5 @@ export enum FailureCode {
     AlreadyReversed = "ALREADY_REVERSED",
     WalletPlayerMismatch = "CURRENCY_MISMATCH",
     UnrecoverableError = "UNRECOVERABLE_ERROR",
+    CurrencyMismatch = "CURRENCY_MISMATCH",
 }
