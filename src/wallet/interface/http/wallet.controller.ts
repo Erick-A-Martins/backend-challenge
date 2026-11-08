@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Headers } from "@nestjs/common";
 import { CreateWalletUseCase } from "../../application/create-wallet.use-case";
 import { GetWalletUseCase } from "../../application/get-wallet.use-case";
 import type { WalletView } from "../../application/wallet.view";
 import { parseCreateWalletRequest } from "./create-wallet.request";
+import { parseCorrelationId } from "../../../shared/interface/http/request-parsing";
 
 @Controller("wallets")
 export class WalletController {
@@ -12,8 +13,14 @@ export class WalletController {
     ) {}
 
     @Post()
-    create(@Body() body: unknown): Promise<WalletView> {
-        return this.createWallet.execute(parseCreateWalletRequest(body));
+    create(
+        @Body() body: unknown,
+        @Headers('x-correlation-id') correlationId: string | undefined,
+    ): Promise<WalletView> {
+        return this.createWallet.execute({
+            ...parseCreateWalletRequest(body),
+            correlationId: parseCorrelationId(correlationId),
+        });
     }
 
     @Get(":walletId")

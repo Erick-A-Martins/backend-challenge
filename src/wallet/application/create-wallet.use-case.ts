@@ -11,10 +11,14 @@ import { WalletLedgerEntry } from "../domain/wallet-ledger-entry";
 import { WalletLedgerRepository } from "../domain/wallet-ledger.repository";
 import { WalletRepository } from "../domain/wallet.repository";
 import { toWalletView, type WalletView } from "./wallet.view";
+import { OutboxRepository } from "../../outbox/domain/outbox.repository";
+import { buildTransactionEvents } from "../../wagering/application/transaction-events";
+import { OutboxMessage } from "../../outbox/domain/outbox-message";
 
 export interface CreateWalletCommand {
     playerId: string;
     initialBalance: MoneyProps;
+    correlationId?: string;
 }
 
 @Injectable()
@@ -24,6 +28,7 @@ export class CreateWalletUseCase {
         private readonly wallets: WalletRepository,
         private readonly transactions: WagerTransactionRepository,
         private readonly ledger: WalletLedgerRepository,
+        private readonly outbox: OutboxRepository,
         private readonly clock: Clock,
         private readonly ids: IdGenerator,
     ) {}
@@ -31,6 +36,7 @@ export class CreateWalletUseCase {
     async execute(command: CreateWalletCommand): Promise<WalletView> {
         const initialBalance = Money.from(command.initialBalance);
         const now = this.clock.now();
+        const correlationId = command.correlationId ?? this.ids.next();
 
         const wallet = Wallet.open({
             id: this.ids.next(),
@@ -65,8 +71,17 @@ export class CreateWalletUseCase {
                     createdAt: now,
                 });
 
+                const events = buildTransactionEvents({
+                    transaction: opening,
+                    wallet,
+                    entry,
+                    context: { correlationId, causationId: opening.id, occurredAt: now },
+                    nextEventId: () => this.ids.next(),
+                });
+
                 await this.transactions.insert(opening);
                 await this.ledger.append(entry);
+                await this.outbox.append(events.map((event) => OutboxMessage.enqueue(event)));
             }
         });
 

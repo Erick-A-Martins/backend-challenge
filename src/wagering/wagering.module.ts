@@ -5,9 +5,10 @@ import { GetWagerTransactionUseCase } from "./application/get-wager-transaction.
 import { SubmitWagerTransactionUseCase } from "./application/submit-wager-transaction.use-case";
 import { WagerPersistenceModule } from "./wager-persistence.module";
 import { WageringController } from "./interface/http/wagering.controller";
+import { OutboxModule } from "../outbox/outbox.module";
 
 @Module({
-    imports: [SharedModule, WalletModule, WagerPersistenceModule],
+    imports: [SharedModule, WalletModule, WagerPersistenceModule, OutboxModule],
     controllers: [WageringController],
     providers: [SubmitWagerTransactionUseCase, GetWagerTransactionUseCase],
     exports: [SubmitWagerTransactionUseCase],

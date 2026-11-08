@@ -18,7 +18,7 @@ export async function createTestOrm(): Promise<MikroORM> {
 export async function truncateAll(orm: MikroORM): Promise<void> {
     await orm.em
         .getConnection()
-        .execute("truncate table wallet_ledger_entries, wager_transactions, wallets");
+        .execute("truncate table wallet_ledger_entries, wager_transactions, wallets, outbox_messages");
 }
 
 export async function query<T>(orm: MikroORM, sql: string, params: unknown[] = []): Promise<T[]> {

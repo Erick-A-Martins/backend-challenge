@@ -40,6 +40,7 @@ describe("idempotência sob concorrência real", () => {
         expect(await ledgerCount(orm, w.id, "DEBIT")).toBe(1);
         expect(await rowCount(orm, "wager_transactions")).toBe(2); // OPENING + a BET
         await expectConsistent(orm, w.id, "75.00");
+        expect(await rowCount(orm, "outbox_messages")).toBe(4); // 2 da abertura + 2 da BET, e nenhum a mais
     });
 
     test("mesma chave com payloads diferentes em paralelo: um vence, o outro é conflito", async () => {

@@ -13,6 +13,8 @@ import { MikroOrmWalletRepository } from "../../../src/wallet/infrastructure/per
 import { query } from "./test-database";
 import { Sha256Hasher } from "../../../src/shared/infrastructure/sha256-hasher";
 import { expect } from "bun:test";
+import { MikroOrmOutboxRepository } from "../../../src/outbox/infrastructure/persistence/mikro-orm-outbox.repository";
+import { OutboxRepository } from "../../../src/outbox/domain/outbox.repository";
 
 export const AT = new Date("2026-01-01T12:00:00.000Z");
 
@@ -22,17 +24,18 @@ export class FixedClock extends Clock {
     }
 }
 
-export function buildUseCases(orm: MikroORM, ledger?: WalletLedgerRepository) {
+export function buildUseCases(orm: MikroORM, ledger?: WalletLedgerRepository, outbox?: OutboxRepository) {
     const unitOfWork = new MikroOrmUnitOfWork(orm.em);
     const wallets = new MikroOrmWalletRepository(orm.em);
     const transactions = new MikroOrmWagerTransactionRepository(orm.em);
     const ledgerRepository = ledger ?? new MikroOrmWalletLedgerRepository(orm.em);
+    const outboxRepository = outbox ?? new MikroOrmOutboxRepository(orm.em);
     const clock = new FixedClock();
     const ids = new UuidV7IdGenerator();
 
     return {
-        createWallet: new CreateWalletUseCase(unitOfWork, wallets, transactions, ledgerRepository, clock, ids),
-        submit: new SubmitWagerTransactionUseCase(unitOfWork, wallets, ledgerRepository, transactions, new Sha256Hasher(), clock, ids),
+        createWallet: new CreateWalletUseCase(unitOfWork, wallets, transactions, ledgerRepository, outboxRepository, clock, ids),
+        submit: new SubmitWagerTransactionUseCase(unitOfWork, wallets, ledgerRepository, transactions, outboxRepository, new Sha256Hasher(), clock, ids),
     };
 }
 
@@ -42,6 +45,7 @@ interface CommandOptions {
     roundId?: string;
     currency?: string;
     playerId?: string;
+    correlationId?: string;
 }
 
 let sequence = 0;
@@ -67,6 +71,7 @@ export function cmd(
         kind,
         money: { amount, currency: options.currency ?? wallet.balance.currency },
         ...(options.ref !== undefined ? { referenceExternalTransactionId: options.ref } : {}),
+        ...(options.correlationId !== undefined ? { correlationId: options.correlationId } : {}),
     };
 }
 
@@ -99,7 +104,7 @@ export const transactionRow = async (orm: MikroORM, externalTransactionId: strin
         )
     )[0];
 
-export const rowCount = async (orm: MikroORM, table: "wallets" | "wager_transactions" | "wallet_ledger_entries") =>
+export const rowCount = async (orm: MikroORM, table: "wallets" | "wager_transactions" | "wallet_ledger_entries" | "outbox_messages") =>
     (await query<{ n: number }>(orm, `select count(*)::int as n from ${table}`))[0]?.n;
 
 export const expectConsistent = async (orm: MikroORM, walletId: string, balance: string) => {

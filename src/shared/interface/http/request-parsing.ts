@@ -30,3 +30,7 @@ export function requireUuid(value: unknown, field: string): string {
     }
     return value.toLowerCase();
 }
+
+export function parseCorrelationId(value: unknown): string | undefined {
+    return optionalString(value, 'X-Correlation-Id header');
+}

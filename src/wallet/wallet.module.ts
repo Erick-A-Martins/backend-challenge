@@ -7,10 +7,11 @@ import { MikroOrmWalletLedgerRepository } from "./infrastructure/persistence/mik
 import { MikroOrmWalletRepository } from "./infrastructure/persistence/mikro-orm-wallet.repository";
 import { GetWalletUseCase } from "./application/get-wallet.use-case";
 import { WalletController } from "./interface/http/wallet.controller";
-import { WagerPersistenceModule } from "../wagering/wager-persistence.module.ts";
+import { WagerPersistenceModule } from "../wagering/wager-persistence.module";
+import { OutboxModule } from "../outbox/outbox.module";
 
 @Module({
-    imports: [SharedModule, WagerPersistenceModule],
+    imports: [SharedModule, WagerPersistenceModule, OutboxModule],
     controllers: [WalletController],
     providers: [
         { provide: WalletRepository, useClass: MikroOrmWalletRepository },

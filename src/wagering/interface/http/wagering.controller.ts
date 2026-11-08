@@ -7,6 +7,7 @@ import {
 import type { WagerTransactionView } from "../../application/wager-transaction.view";
 import { WagerTransactionStatus } from "../../domain/enums/wager-transaction-status";
 import { parseSubmitTransactionRequest } from "./submit-transaction.request";
+import { parseCorrelationId } from "../../../shared/interface/http/request-parsing";
 
 interface StatusSetter {
     status(code: number): unknown;
@@ -33,10 +34,16 @@ export class WageringController {
     @Post("wagering/transactions")
     async submit(
         @Headers("idempotency-key") idempotencyKey: string | undefined,
+        @Headers('x-correlation-id') correlationId: string | undefined,
         @Body() body: unknown,
         @Res({ passthrough: true }) response: StatusSetter,
     ): Promise<SubmitWagerTransactionResult> {
-        const result = await this.submitTransaction.execute(parseSubmitTransactionRequest(idempotencyKey, body));
+        const command = parseSubmitTransactionRequest(idempotencyKey, body);
+        const result = await this.submitTransaction.execute({
+            ...command,
+            correlationId: parseCorrelationId(correlationId),
+        });
+
         response.status(httpStatusFor(result));
         return result;
     }

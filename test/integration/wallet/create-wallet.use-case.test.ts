@@ -1,25 +1,13 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import type { MikroORM } from "@mikro-orm/postgresql";
-import { Clock } from "../../../src/shared/application/clock";
-import { InvalidMoneyError } from "../../../src/shared/domain/errors/invalid-money.error";
-import { MikroOrmUnitOfWork } from "../../../src/shared/infrastructure/database/mikro-orm-unit-of-work";
-import { UuidV7IdGenerator } from "../../../src/shared/infrastructure/uuid-v7-id-generator";
-import { MikroOrmWagerTransactionRepository } from "../../../src/wagering/infrastructure/persistence/mikro-orm-wager-transaction.repository";
-import { CreateWalletUseCase } from "../../../src/wallet/application/create-wallet.use-case";
-import { WalletAlreadyExistsError } from "../../../src/wallet/domain/errors/wallet-already-exists.error";
-import { WalletLedgerRepository } from "../../../src/wallet/domain/wallet-ledger.repository";
-import { MikroOrmWalletLedgerRepository } from "../../../src/wallet/infrastructure/persistence/mikro-orm-wallet-ledger.repository";
-import { MikroOrmWalletRepository } from "../../../src/wallet/infrastructure/persistence/mikro-orm-wallet.repository";
-import { createTestOrm, query, truncateAll } from "../support/test-database";
+import {afterAll, beforeAll, beforeEach, describe, expect, test} from "bun:test";
+import type {MikroORM} from "@mikro-orm/postgresql";
+import {InvalidMoneyError} from "../../../src/shared/domain/errors/invalid-money.error";
+import {WalletAlreadyExistsError} from "../../../src/wallet/domain/errors/wallet-already-exists.error";
+import {WalletLedgerRepository} from "../../../src/wallet/domain/wallet-ledger.repository";
+import {createTestOrm, query, truncateAll} from "../support/test-database";
+import {buildUseCases} from "../support/fixtures";
 
 const AT = new Date("2026-01-01T12:00:00.000Z");
 const PLAYER = "0192f28f-5dc0-7d58-bdb2-814ad6a0f4a1";
-
-class FixedClock extends Clock {
-    override now(): Date {
-        return AT;
-    }
-}
 
 class FailingLedgerRepository extends WalletLedgerRepository {
     override async append(): Promise<void> {
@@ -33,15 +21,7 @@ interface LedgerRow { direction: string; amount: string; balance_before: string;
 
 let orm: MikroORM;
 
-const build = (ledger?: WalletLedgerRepository) =>
-    new CreateWalletUseCase(
-        new MikroOrmUnitOfWork(orm.em),
-        new MikroOrmWalletRepository(orm.em),
-        new MikroOrmWagerTransactionRepository(orm.em),
-        ledger ?? new MikroOrmWalletLedgerRepository(orm.em),
-        new FixedClock(),
-        new UuidV7IdGenerator(),
-    );
+const build = (ledger?: WalletLedgerRepository) => buildUseCases(orm, ledger).createWallet;
 
 const command = (amount: string, currency = "BRL", playerId = PLAYER) => ({
     playerId,

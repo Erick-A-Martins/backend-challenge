@@ -20,6 +20,9 @@ import { WagerTransactionKind } from "../domain/enums/wager-transaction-kind";
 import { WagerTransactionStatus } from "../domain/enums/wager-transaction-status";
 import { WagerTransactionRepository } from "../domain/wager-transaction.repository";
 import { ReferenceRetryPolicy } from "./reference-retry.policy";
+import { OutboxRepository } from "../../outbox/domain/outbox.repository";
+import { OutboxMessage } from "../../outbox/domain/outbox-message";
+import { buildTransactionEvents } from "./transaction-events";
 
 export interface SubmitWagerTransactionCommand {
     providerId: string;
@@ -32,6 +35,7 @@ export interface SubmitWagerTransactionCommand {
     kind: WagerTransactionKind;
     money: MoneyProps;
     referenceExternalTransactionId?: string;
+    correlationId?: string;
 }
 
 export interface SubmitWagerTransactionResult {
@@ -49,6 +53,7 @@ export class SubmitWagerTransactionUseCase {
         private readonly wallets: WalletRepository,
         private readonly ledger: WalletLedgerRepository,
         private readonly transactions: WagerTransactionRepository,
+        private readonly outbox: OutboxRepository,
         private readonly hasher: Hasher,
         private readonly clock: Clock,
         private readonly ids: IdGenerator,
@@ -71,6 +76,8 @@ export class SubmitWagerTransactionUseCase {
         );
 
         const now = this.clock.now();
+        const correlationId = command.correlationId ?? this.ids.next();
+
         const transaction = WagerTransaction.create({
             id: this.ids.next(),
             providerId: command.providerId,
@@ -118,12 +125,22 @@ export class SubmitWagerTransactionUseCase {
             const entry = await this.process(wallet, transaction, now);
             transaction.recordObservedBalance(wallet.balance);
 
-            // 4) Grava tudo na mesma transação SQL (ordem imposta pelas chaves estrangeiras).
+            // 4) Eventos de integração: nascem na mesma transação SQL da mudança financeira.
+            const events = buildTransactionEvents({
+                transaction,
+                wallet,
+                entry,
+                context: { correlationId, causationId: transaction.id, occurredAt: now },
+                nextEventId: () => this.ids.next(),
+            });
+
+            // 5) Grava tudo atomicamente (ordem imposta pelas chaves estrangeiras).
             await this.transactions.insert(transaction);
             if (entry) {
                 await this.wallets.update(wallet);
                 await this.ledger.append(entry);
             }
+            await this.outbox.append(events.map((event) => OutboxMessage.enqueue(event)));
 
             return this.toResult(transaction, false);
         });
