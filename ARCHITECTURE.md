@@ -21,7 +21,7 @@ As garantias principais são sustentadas pelo PostgreSQL: idempotência persiste
 | Inbox e consumer SQS | Implementado |
 | Outbox transacional e publisher SQS com lease/retry | Implementado |
 | Testes de integração com PostgreSQL e LocalStack | Implementado para os cenários listados na seção 8 |
-| Worker de `PENDING_REFERENCE` | Pendente |
+| Worker de `PENDING_REFERENCE` | Implementado; cobertura dedicada do worker ainda precisa ser adicionada |
 | Consulta paginada do ledger e endpoint de reconciliação | Pendente |
 | Métricas e logs estruturados completos | Pendente |
 | Prova de concorrência com três ou mais processos e recuperação após reinício | Pendente |
@@ -102,7 +102,15 @@ O domínio não importa NestJS nem MikroORM. Repositórios são portas abstratas
 
 O lock da linha da wallet serializa operações da mesma wallet e deixa wallets distintas progredirem em paralelo. É uma garantia no banco, não um lock local da instância. Os testes exercitam disputas de saldo, hot wallet, wallets distintas e 50 submissões idênticas em paralelo; ainda falta executar o cenário com três ou mais processos/instâncias independentes.
 
-## 6. Inbox, consumer e outbox
+## 6. Worker de referências pendentes
+
+`PendingReferenceWorker` busca transações `PENDING_REFERENCE` cujo `next_attempt_at` venceu. A consulta é limitada por lote e usa lock pessimista com `SKIP LOCKED`, dentro do `UnitOfWork`, para que workers de instâncias diferentes não processem simultaneamente a mesma linha.
+
+Para cada item, o worker chama `SubmitWagerTransactionUseCase.retryPendingReference()`. O caso de uso volta a bloquear a wallet, carrega a transação referenciada e reutiliza `checkReference`, as regras de `REFUND`/`ROLLBACK`, o cálculo do ledger e a criação dos eventos. Assim, referência ausente, `PENDING` ou `PENDING_REFERENCE` continua aguardando; referência terminal inválida é rejeitada; e referência processada permite concluir a operação.
+
+`ReferenceRetryPolicy` permite até oito consultas totais, incluindo a tentativa inicial da API/SQS. O intervalo cresce de 5 segundos até o teto de 5 minutos. Esgotadas as tentativas sem encontrar uma referência processada, a transação vira `REJECTED` com `REFERENCE_NOT_FOUND` e o evento de rejeição é gravado na outbox. A configuração do worker inclui `REFERENCE_RETRY_BATCH_SIZE` e `REFERENCE_RETRY_POLL_MS`.
+
+## 7. Inbox, consumer e outbox
 
 ### Consumer e inbox
 
@@ -123,7 +131,7 @@ O publisher reivindica linhas com lease e `FOR UPDATE SKIP LOCKED`, envia à fil
 
 A fila de saída é distinta da fila de solicitações. A fila de eventos ainda não possui uma DLQ configurada no Compose; falhas do publisher são retentadas pela própria outbox.
 
-## 7. HTTP e health checks
+## 8. HTTP e health checks
 
 ### Endpoints implementados
 
@@ -141,7 +149,7 @@ A readiness responde `200` quando as dependências estão disponíveis e `503` q
 
 Ainda não existem `GET /wallets/:walletId/ledger` nem `POST /wallets/:walletId/reconciliation`.
 
-## 8. Testes existentes e cobertura pendente
+## 9. Testes existentes e cobertura pendente
 
 ### Implementados
 
@@ -155,11 +163,11 @@ Ainda não existem `GET /wallets/:walletId/ledger` nem `POST /wallets/:walletId/
 - Três ou mais processos/instâncias concorrentes.
 - Reinício completo do serviço com verificação de consistência.
 - `REFUND`/`ROLLBACK` chegando antes da referência e reprocessamento pelo worker.
-- Worker de `PENDING_REFERENCE`, incluindo limite de tentativas e rejeição final.
+- Cobertura de integração dedicada ao worker de referências pendentes, incluindo esgotamento de tentativas.
 - Métricas e logs estruturados exigidos pelo challenge.
 - Testes dos endpoints de health.
 
-## 9. Decisões, trade-offs e limitações conhecidas
+## 10. Decisões, trade-offs e limitações conhecidas
 
 - `bigint` em centavos evita erro de ponto flutuante e assume escala de duas casas.
 - Entities ORM separadas do domínio aumentam mapeamento, mantendo domínio independente.
@@ -169,9 +177,9 @@ Ainda não existem `GET /wallets/:walletId/ledger` nem `POST /wallets/:walletId/
 - Autenticação não foi implementada, como permitido pelo challenge. O desenho adotado é integrar um Identity Provider externo por OIDC; o guard/ponto de extensão ainda precisa ser explicitado no código.
 - Logging existe, mas ainda não é JSON estruturado com todos os IDs exigidos. Métricas de negócio e infraestrutura ainda não foram adicionadas.
 
-## 10. Próximos passos
+## 11. Próximos passos
 
-1. Implementar worker de `PENDING_REFERENCE` e cobrir referências fora de ordem.
+1. Cobrir o worker com testes de integração para referência fora de ordem e tentativas esgotadas.
 2. Implementar consulta paginada do ledger e reconciliação.
 3. Completar testes multi-instância, reinício e health.
 4. Adicionar métricas e logs estruturados.
