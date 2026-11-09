@@ -6,8 +6,8 @@ import {
 } from "../../application/submit-wager-transaction.use-case";
 import type { WagerTransactionView } from "../../application/wager-transaction.view";
 import { WagerTransactionStatus } from "../../domain/enums/wager-transaction-status";
-import { parseSubmitTransactionRequest } from "./submit-transaction.request";
-import { parseCorrelationId } from "../../../shared/interface/http/request-parsing";
+import { parseSubmitTransactionRequest } from "../../application/submit-transaction.parser.ts";
+import { parseCorrelationId } from "../../../shared/application/input-parsing.ts";
 
 interface StatusSetter {
     status(code: number): unknown;

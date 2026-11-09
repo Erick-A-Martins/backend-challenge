@@ -84,4 +84,13 @@ describe("rehydrate", () => {
         expect(message.attempts).toBe(3);
         expect(message.isPending()).toBe(true);
     });
+
+    test("o lease reivindicado fica visível e as transições não o alteram", () => {
+        const message = OutboxMessage.rehydrate({
+            id: 'e1', aggregateId: 'w1', eventType: 'TestEvent', payload: {}, occurredAt: T0,
+            attempts: 0, nextAttemptAt: T0, lockedUntil: after(30_000), leaseToken: 'token-1',
+        });
+        message.scheduleRetry(T0);
+        expect(message.leaseToken).toBe('token-1');
+    });
 });

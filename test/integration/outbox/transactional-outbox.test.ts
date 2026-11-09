@@ -13,6 +13,15 @@ class FailingOutboxRepository extends OutboxRepository {
     override async append(): Promise<void> {
         throw new Error("outbox boom");
     }
+    override async claimDue(): Promise<never[]> {
+        return [];
+    }
+    override async markPublished(): Promise<boolean> {
+        return false;
+    }
+    override async release(): Promise<boolean> {
+        return false;
+    }
 }
 
 class FailingLedgerRepository extends WalletLedgerRepository {

@@ -15,6 +15,8 @@ export interface OutboxMessageState {
     nextAttemptAt: Date;
     publishedAt?: Date;
     lastError?: string;
+    lockedUntil?: Date;
+    leaseToken?: string;
 }
 
 export class OutboxMessage {
@@ -28,6 +30,8 @@ export class OutboxMessage {
         private _nextAttemptAt: Date,
         private _publishedAt: Date | undefined,
         private _lastError: string | undefined,
+        public readonly lockedUntil: Date | undefined,
+        public readonly leaseToken: string | undefined,
     ) {}
     
     static enqueue(event: IntegrationEvent<unknown>): OutboxMessage {
@@ -39,6 +43,8 @@ export class OutboxMessage {
             event.occurredAt,
             0,
             event.occurredAt,
+            undefined,
+            undefined,
             undefined,
             undefined,
         );
@@ -56,6 +62,8 @@ export class OutboxMessage {
             state.nextAttemptAt,
             state.publishedAt,
             state.lastError,
+            state.lockedUntil,
+            state.leaseToken,
         );
     }
 

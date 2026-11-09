@@ -3,7 +3,7 @@ import { CreateWalletUseCase } from "../../application/create-wallet.use-case";
 import { GetWalletUseCase } from "../../application/get-wallet.use-case";
 import type { WalletView } from "../../application/wallet.view";
 import { parseCreateWalletRequest } from "./create-wallet.request";
-import { parseCorrelationId } from "../../../shared/interface/http/request-parsing";
+import { parseCorrelationId } from "../../../shared/application/input-parsing.ts";
 
 @Controller("wallets")
 export class WalletController {

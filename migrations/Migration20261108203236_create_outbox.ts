@@ -6,25 +6,27 @@ export class Migration20261108203236_create_outbox extends Migration {
 
   override up(): void | Promise<void> {
     this.addSql(`
-      create table outbox_messages (
-        id              uuid        primary key,
-        aggregate_id    uuid        not null,
-        event_type      text        not null,
-        payload         jsonb       not null,
-        occurred_at     timestamptz not null,
-        attempts        integer     not null default 0,
-        next_attempt_at timestamptz not null,
-        published_at    timestamptz,
-        last_error      text,
-        constraint outbox_attempts_ck check (attempts >= 0)
-      )
-    `);
-
+    create table outbox_messages (
+      id              uuid        primary key,
+      aggregate_id    uuid        not null,
+      event_type      text        not null,
+      payload         jsonb       not null,
+      occurred_at     timestamptz not null,
+      attempts        integer     not null default 0,
+      next_attempt_at timestamptz not null,
+      published_at    timestamptz,
+      last_error      text,
+      locked_until    timestamptz,
+      lock_token      text,
+      constraint outbox_attempts_ck   check (attempts >= 0),
+      constraint outbox_lease_pair_ck check ((locked_until is null) = (lock_token is null))
+    )
+  `);
     this.addSql(`
-      create index outbox_pending_due_idx
-        on outbox_messages (next_attempt_at, id)
-        where published_at is null
-    `);
+    create index outbox_pending_due_idx
+      on outbox_messages (next_attempt_at, id)
+      where published_at is null
+  `);
   }
 
   override down(): void | Promise<void> {

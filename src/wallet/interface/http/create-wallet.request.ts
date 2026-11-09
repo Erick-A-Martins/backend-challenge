@@ -1,5 +1,5 @@
 import { InvalidRequestError } from "../../../shared/domain/errors/invalid-request.error";
-import { isRecord, isUuid } from "../../../shared/interface/http/request-parsing";
+import { isRecord, isUuid } from "../../../shared/application/input-parsing.ts";
 import type { CreateWalletCommand } from "../../application/create-wallet.use-case";
 
 export function parseCreateWalletRequest(body: unknown): CreateWalletCommand {

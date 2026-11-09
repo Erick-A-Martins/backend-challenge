@@ -1,12 +1,12 @@
-import { InvalidRequestError } from "../../../shared/domain/errors/invalid-request.error";
+import { InvalidRequestError } from "../../shared/domain/errors/invalid-request.error.ts";
 import {
     isRecord,
     optionalString,
     requireString,
     requireUuid,
-} from "../../../shared/interface/http/request-parsing";
-import type { SubmitWagerTransactionCommand } from "../../application/submit-wager-transaction.use-case";
-import { WagerTransactionKind } from "../../domain/enums/wager-transaction-kind";
+} from "../../shared/application/input-parsing.ts";
+import type { SubmitWagerTransactionCommand } from "./submit-wager-transaction.use-case.ts";
+import { WagerTransactionKind } from "../domain/enums/wager-transaction-kind.ts";
 
 const SUBMITTABLE_KINDS: readonly string[] = [
     WagerTransactionKind.Bet,

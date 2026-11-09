@@ -1,4 +1,4 @@
-import { InvalidRequestError } from "../../domain/errors/invalid-request.error.ts";
+import { InvalidRequestError } from "../domain/errors/invalid-request.error.ts";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

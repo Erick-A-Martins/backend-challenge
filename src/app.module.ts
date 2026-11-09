@@ -4,8 +4,9 @@ import { MikroOrmModule } from "@mikro-orm/nestjs";
 import { HealthModule } from "./health/health.module";
 import { WalletModule } from "./wallet/wallet.module";
 import { WageringModule } from "./wagering/wagering.module";
+import { MessagingModule } from "./messaging/messaging.module";
 
 @Module({
-    imports: [MikroOrmModule.forRoot(config), HealthModule, WalletModule, WageringModule],
+    imports: [MikroOrmModule.forRoot(config), HealthModule, WalletModule, WageringModule, MessagingModule],
 })
 export class AppModule {}

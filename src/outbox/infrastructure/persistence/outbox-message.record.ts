@@ -28,4 +28,10 @@ export class OutboxMessageRecord {
 
     @Property({ type: "string", columnType: "text", nullable: true })
     lastError?: string | null;
+
+    @Property({ type: "Date", columnType: "timestamptz", nullable: true })
+    lockedUntil?: Date | null;
+
+    @Property({ type: "string", columnType: "text", nullable: true })
+    lockToken?: string | null;
 }

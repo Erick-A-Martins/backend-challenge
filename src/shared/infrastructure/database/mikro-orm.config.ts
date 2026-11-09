@@ -6,11 +6,12 @@ import { WalletRecord } from "../../../wallet/infrastructure/persistence/wallet.
 import { WagerTransactionRecord } from "../../../wagering/infrastructure/persistence/wager-transaction.record";
 import { WalletLedgerEntryRecord } from "../../../wallet/infrastructure/persistence/wallet-ledger-entry.record";
 import { OutboxMessageRecord } from "../../../outbox/infrastructure/persistence/outbox-message.record";
+import { InboxMessageRecord } from "../../../messaging/infrastructure/persistence/inbox-message.record";
 
 export default defineConfig({
     clientUrl: process.env.DATABASE_URL,
     metadataProvider: ReflectMetadataProvider,
-    entities: [WalletRecord, WagerTransactionRecord, WalletLedgerEntryRecord, OutboxMessageRecord],
+    entities: [WalletRecord, WagerTransactionRecord, WalletLedgerEntryRecord, OutboxMessageRecord, InboxMessageRecord],
     extensions: [Migrator],
     migrations: {
         path: "./migrations",

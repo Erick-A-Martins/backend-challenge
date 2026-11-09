@@ -104,10 +104,22 @@ export const transactionRow = async (orm: MikroORM, externalTransactionId: strin
         )
     )[0];
 
-export const rowCount = async (orm: MikroORM, table: "wallets" | "wager_transactions" | "wallet_ledger_entries" | "outbox_messages") =>
+export const rowCount = async (orm: MikroORM, table: "wallets" | "wager_transactions" | "wallet_ledger_entries" | "outbox_messages" | "inbox_messages") =>
     (await query<{ n: number }>(orm, `select count(*)::int as n from ${table}`))[0]?.n;
 
 export const expectConsistent = async (orm: MikroORM, walletId: string, balance: string) => {
     expect((await walletState(orm, walletId))?.balance).toBe(balance);
     expect(await ledgerTotal(orm, walletId)).toBe(balance);
 };
+
+export class MutableClock extends Clock {
+    constructor(private current: Date) {
+        super();
+    }
+    override now(): Date {
+        return this.current;
+    }
+    advance(ms: number): void {
+        this.current = new Date(this.current.getTime() + ms);
+    }
+}
