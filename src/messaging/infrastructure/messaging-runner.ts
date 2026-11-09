@@ -8,6 +8,7 @@ import { describeError } from "../../shared/application/describe-error";
 import { OutboxPublisher } from "../application/outbox-publisher";
 import { WagerMessageConsumer } from "../application/wager-message-consumer";
 import { MessagingConfig } from "../messaging.config";
+import { PendingReferenceWorker } from "../../wagering/application/pending-reference.worker";
 
 const ERROR_BACKOFF_MS = 2_000;
 
@@ -25,6 +26,7 @@ export class MessagingRunner implements OnApplicationBootstrap, BeforeApplicatio
         private readonly config: MessagingConfig,
         private readonly publisher: OutboxPublisher,
         private readonly consumer: WagerMessageConsumer,
+        private readonly pendingReferences: PendingReferenceWorker,
     ) {}
 
     onApplicationBootstrap(): void {
@@ -36,6 +38,12 @@ export class MessagingRunner implements OnApplicationBootstrap, BeforeApplicatio
         this.loops = [
             this.loop("outbox-publisher", async () => (await this.publisher.publishPending()).claimed, this.config.settings.publisherPollMs),
             this.loop("wager-consumer", async () => (await this.consumer.pollOnce(() => !this.running)).length, 0),
+            this.loop(
+                "pending-reference-worker",
+                async () =>
+                    (await this.pendingReferences.processDueBatch(this.config.settings.referenceRetryBatchSize)).retried,
+                this.config.settings.referenceRetryPollMs,
+            ),
         ];
     }
 

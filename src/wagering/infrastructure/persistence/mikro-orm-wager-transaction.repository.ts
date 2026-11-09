@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { UniqueConstraintViolationException } from "@mikro-orm/core";
+import { LockMode, UniqueConstraintViolationException } from "@mikro-orm/core";
 import { EntityManager } from "@mikro-orm/postgresql";
 import { DuplicateTransactionError } from "../../domain/errors/duplicate-transaction.error";
 import type { WagerTransaction } from "../../domain/wager-transaction";
@@ -26,6 +26,32 @@ export class MikroOrmWagerTransactionRepository extends WagerTransactionReposito
         }
     }
 
+    override async update(transaction: WagerTransaction): Promise<void> {
+        const observedBalance = transaction.observedBalance;
+        if (observedBalance === undefined) {
+            throw new Error(`Transaction ${transaction.id} has no observed balance`);
+        }
+
+        const updated = await this.em.nativeUpdate(
+            WagerTransactionRecord,
+            { id: transaction.id },
+            {
+                referenceTransactionId: transaction.referenceTransactionId ?? null,
+                status: transaction.status,
+                failureCode: transaction.failureCode ?? null,
+                processedAt: transaction.processedAt ?? null,
+                referenceAttempts: transaction.referenceAttempts,
+                nextAttemptAt: transaction.nextAttemptAt ?? null,
+                observedBalance: observedBalance.toString(),
+                observedBalanceCurrency: observedBalance.currency,
+            },
+        );
+
+        if (updated === 0) {
+            throw new Error(`Transaction ${transaction.id} disappeared during update`);
+        }
+    }
+
     override async findByProviderAndExternalId(
         providerId: string,
         externalTransactionId: string,
@@ -46,6 +72,35 @@ export class MikroOrmWagerTransactionRepository extends WagerTransactionReposito
     override async findById(id: string): Promise<WagerTransaction | null> {
         const record = await this.em.findOne(WagerTransactionRecord, { id });
         return record ? toWagerTransaction(record) : null;
+    }
+
+    override async findByIdForUpdate(id: string): Promise<WagerTransaction | null> {
+        const record = await this.em.findOne(
+            WagerTransactionRecord,
+            { id },
+            { lockMode: LockMode.PESSIMISTIC_WRITE },
+        );
+        return record ? toWagerTransaction(record) : null;
+    }
+
+    override async findDuePendingReferencesForUpdate(now: Date, limit: number): Promise<WagerTransaction[]> {
+        if (!Number.isInteger(limit) || limit < 1) {
+            throw new RangeError("limit must be a positive integer");
+        }
+
+        const records = await this.em.find(
+            WagerTransactionRecord,
+            {
+                status: WagerTransactionStatus.PendingReference,
+                nextAttemptAt: { $lte: now },
+            },
+            {
+                orderBy: { nextAttemptAt: "asc", id: "asc" },
+                limit,
+                lockMode: LockMode.PESSIMISTIC_PARTIAL_WRITE,
+            },
+        );
+        return records.map(toWagerTransaction);
     }
 
     override async findByProviderAndIdempotencyKey(

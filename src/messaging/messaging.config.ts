@@ -15,6 +15,8 @@ export interface MessagingSettings {
     consumerWaitSeconds: number;
     retryBaseSeconds: number;
     retryMaxSeconds: number;
+    referenceRetryBatchSize: number;
+    referenceRetryPollMs: number;
 }
 
 type Env = Record<string, string | undefined>;
@@ -46,6 +48,8 @@ export class MessagingConfig {
             consumerWaitSeconds: numberFrom(env["CONSUMER_WAIT_SECONDS"], 5),
             retryBaseSeconds: 2,
             retryMaxSeconds: 60,
+            referenceRetryBatchSize: numberFrom(env["REFERENCE_RETRY_BATCH_SIZE"], 25),
+            referenceRetryPollMs: numberFrom(env["REFERENCE_RETRY_POLL_MS"], 1_000),
         });
     }
 
