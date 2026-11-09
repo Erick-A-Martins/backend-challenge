@@ -1,386 +1,179 @@
-# Arquitetura: Distributed Wagering Processor
+# Arquitetura — Distributed Wagering Processor
 
-> Documento vivo. Seções marcadas com ⏳ descrevem decisões **planejadas** e serão confirmadas
-> (ou ajustadas) quando a parte correspondente for implementada.
+## 1. Objetivo e estado
 
-## 1. Visão geral
+Serviço financeiro para processar operações de apostas de múltiplos provedores. A entrega de mensagens é *at least once*: duplicatas, entregas fora de ordem, falhas e concorrência fazem parte do cenário esperado.
 
-Serviço financeiro distribuído que processa transações de apostas (`BET`, `WIN`, `LOSS`, `REFUND`,
-`ROLLBACK`) vindas de múltiplos provedores, via HTTP e SQS, com entrega *at-least-once*.
+As garantias principais são sustentadas pelo PostgreSQL: idempotência persistente, saldo não negativo, ledger append-only e atomicidade entre a operação financeira e seus registros. O SQS transporta mensagens e pode redeliver; FIFO não substitui as constraints nem a inbox.
 
-O sistema deve permanecer correto quando as mensagens forem duplicadas, chegarem fora de ordem ou
-forem processadas simultaneamente por várias instâncias. As invariantes globais são:
+### Estado atual
 
-- nunca duplicar crédito nem débito;
-- nunca permitir saldo negativo;
-- nunca perder um evento confirmado;
-- `wallet.balance == saldo reconstruído pelo ledger`.
-
-**Princípio central:** o banco de dados é o responsável final pelas invariantes. Unicidade,
-não-negatividade e imutabilidade do ledger estão no schema, não apenas no código. Ordenação e
-deduplicação do broker são otimizações, nunca a garantia de consistência.
-
-## 2. Estado da implementação
-
-| Área | Estado |
+| Área | Estado atual |
 |---|---|
-| Infra local (Compose, PostgreSQL, SQS FIFO + DLQ) | ✅ |
-| Migrations versionadas e reversíveis | ✅ |
-| `Money` | ✅ |
-| `Wallet` e `WalletLedgerEntry` (domínio) | ✅ |
-| `WagerTransaction` (domínio) | ✅ |
-| Schema e constraints | ✅ |
-| Persistência e criação de wallet com `OPENING` (atômica) | ✅ |
-| HTTP de wallets (`POST /wallets`, `GET /wallets/:id`) | ✅ |
-| Submissão de transações e idempotência | ⏳ |
-| Concorrência (lock por wallet) | ⏳ |
-| Inbox, outbox, publisher e consumer SQS | ⏳ |
-| Worker de `PENDING_REFERENCE` | ⏳ |
-| Ledger paginado e reconciliação | ⏳ |
-| Observabilidade e `health/ready` (liveness ✅) | ⏳ |
-| Testes de concorrência e de falha | ⏳ |
+| Bun, TypeScript estrito, NestJS, PostgreSQL e MikroORM | Implementado |
+| Compose para PostgreSQL e LocalStack/SQS | Implementado |
+| Migrations reversíveis para wallet, transações, ledger, outbox e inbox | Implementado |
+| Money, Wallet, WalletLedgerEntry e WagerTransaction | Implementado |
+| API de criação e consulta de wallet | Implementado |
+| API de submissão e consulta de transações | Implementado |
+| Idempotência HTTP e proteção contra replay conflitante | Implementado |
+| Lock pessimista por wallet | Implementado |
+| Inbox e consumer SQS | Implementado |
+| Outbox transacional e publisher SQS com lease/retry | Implementado |
+| Testes de integração com PostgreSQL e LocalStack | Implementado para os cenários listados na seção 8 |
+| Worker de `PENDING_REFERENCE` | Pendente |
+| Consulta paginada do ledger e endpoint de reconciliação | Pendente |
+| Métricas e logs estruturados completos | Pendente |
+| Prova de concorrência com três ou mais processos e recuperação após reinício | Pendente |
 
-## 3. Stack
+## 2. Stack e execução local
 
-| Item | Escolha |
-|---|---|
-| Runtime, package manager e test runner | Bun |
-| Linguagem | TypeScript em modo estrito |
-| Framework | NestJS 12 (ESM) |
-| Banco | PostgreSQL 17 |
-| ORM | MikroORM 7 |
-| Mensageria | AWS SQS (FIFO + DLQ) via LocalStack |
-| Orquestração local | Docker Compose |
+- Runtime, package manager e testes: Bun 1.x.
+- Linguagem: TypeScript em modo estrito.
+- Framework: NestJS.
+- Banco e ORM: PostgreSQL 17 e MikroORM 7.
+- Mensageria local: SQS via LocalStack 4.14.
+- Migrations: SQL manual em classes MikroORM, com `up` e `down`.
 
-## 4. Arquitetura em camadas
+Os passos de instalação, configuração, execução da API, uso dos endpoints e comandos de teste estão no `README.md`. O banco de testes é `wallet_test`; o helper de integração recusa nomes de banco que não terminem em `_test`.
 
-Organização por módulo de negócio, com camadas DDD dentro de cada um:
+## 3. Organização e dependências
 
-```
+O código é dividido por módulo de negócio:
+
+```text
 src/
-├── main.ts, app.module.ts, app.setup.ts
-├── shared/
-│   ├── domain/            Money, DomainError e erros base
-│   ├── application/       portas: UnitOfWork, Clock, IdGenerator
-│   ├── infrastructure/    implementações das portas, config do ORM
-│   └── interface/http/    filtro global de exceções, helpers de parsing
-├── wallet/
-│   ├── domain/            Wallet, WalletLedgerEntry, portas de repositório, erros
-│   ├── application/       CreateWallet, GetWallet, WalletView
-│   ├── infrastructure/persistence/   records do ORM, mappers, repositórios
-│   └── interface/http/    controller e parsing do request
-├── wagering/
-│   ├── domain/            WagerTransaction, FailureCode, portas, erros
-│   └── infrastructure/persistence/
-└── health/
+├── shared/       Money, erros comuns, hashing, relógio, IDs, UoW e HTTP compartilhado
+├── wallet/       domínio, aplicação, persistência e API de wallets
+├── wagering/     domínio, aplicação, persistência e API de transações
+├── outbox/       evento persistido e repositório de publicação
+├── messaging/    inbox, gateway SQS, consumer, publisher e runner
+└── health/       endpoints de liveness e readiness
 ```
 
-Regras de dependência:
+O domínio não importa NestJS nem MikroORM. Repositórios são portas abstratas; as implementações MikroORM e SQS ficam na infraestrutura. Casos de uso dependem das portas e recebem `Clock`, `IdGenerator`, `Hasher` e `UnitOfWork` por injeção.
 
-- `domain/` **nunca** importa `@nestjs/*` nem `@mikro-orm/*`.
-- A dependência aponta para dentro: `interface` e `infrastructure` → `application` → `domain`.
-- Portas de repositório vivem no domínio e são **classes abstratas**. Interfaces TypeScript somem
-  em tempo de execução, e o Nest precisa de um valor como token de injeção. A classe abstrata é,
-  ao mesmo tempo, o contrato e o token.
-- Modelos de domínio têm construtor privado e factories estáticas (`create`, `open`, `rehydrate`).
-  `rehydrate` reconstrói estado já persistido e **não** revalida transições.
-- Relógio e geração de ids entram por portas (`Clock`, `IdGenerator`), então o domínio é
-  determinístico e testável. Os ids são UUIDv7 (`Bun.randomUUIDv7()`), ordenáveis por tempo.
+## 4. Dinheiro, wallet e ledger
 
-## 5. Decisões técnicas
+### Money
 
-### 5.1 ORM e estratégia transacional
+- Entrada e saída são strings decimais; a aritmética interna usa `bigint` em centavos.
+- A escala aceita é fixa em duas casas, sem conversão monetária por `number`.
+- `Money` é imutável e valida formato, escala e moeda.
+- O valor no banco é `numeric(19,2)`; moeda fica em coluna separada.
 
-**MikroORM 7**, pelos recursos que o desafio exige: `em.transactional()`, `LockMode` para
-pessimistic locking, Unit of Work explícito e migrations com `up` e `down`.
+### Wallet
 
-- **Entities do ORM são separadas do domínio** (`WalletRecord`, `WagerTransactionRecord`,
-  `WalletLedgerEntryRecord`), com *mappers* entre os dois mundos. Isso mantém o domínio puro, sem
-  decorators. Custo: mais arquivos e mapeamento explícito.
-- **Escrita com `em.insert()`**, sem `persist`/`flush`. Cada repositório executa exatamente o SQL
-  pretendido, sem identity map nem escrita implícita. Combina com um ledger que só recebe
-  inserções.
-- **`UnitOfWork` é uma porta** (`run(work)`), implementada com `em.transactional()`. Os
-  repositórios que usam o mesmo `EntityManager` participam da transação automaticamente, porque o
-  MikroORM propaga o contexto transacional. Isso é **provado por teste de integração**: uma falha
-  ao gravar o ledger desfaz a wallet e a transação `OPENING`.
-- **Decorators**: `@mikro-orm/decorators/legacy` com `ReflectMetadataProvider`, que é o formato
-  que o NestJS usa. Os tipos das colunas são declarados explicitamente nas entities, sem depender
-  da inferência de metadados.
-- **Migrations escritas à mão em SQL** (`migration:create --blank`). Constraints, índices
-  parciais e triggers não saem de um diff automático. O snapshot do MikroORM está desligado
-  (`snapshot: false`) para não gerar diffs enganosos.
-- Violação do `UNIQUE (player_id, currency)` é traduzida, dentro do repositório, para
-  `WalletAlreadyExistsError`. O caso de uso não conhece exceções do ORM.
+- Uma wallet por `(player_id, currency)`, imposto por constraint.
+- Saldo não negativo, imposto por `CHECK` no PostgreSQL e regra de domínio.
+- Operações que alteram saldo usam `SELECT ... FOR UPDATE` na wallet.
+- `version` começa em 1 e só aumenta quando o saldo muda.
+- O saldo inicial positivo cria `OPENING` e crédito no ledger na mesma transação da wallet.
 
-### 5.2 Money
+### Ledger
 
-- Representação interna: **`bigint` em centavos**, sem biblioteca. A escala é fixa em 2 casas,
-  então a aritmética de inteiros é exata e sem arredondamento. (O esqueleto do README sugere
-  `Decimal`; a assinatura pública foi preservada.)
-- Entrada como **string decimal validada por regex** (`^\d{1,15}(\.\d{1,2})?$`), nunca convertida
-  para `number`. Rejeita `NaN`, `Infinity`, notação científica, string vazia, sinal, espaços e
-  mais de 2 casas decimais.
-- **Limite de 15 dígitos inteiros na entrada.** A coluna é `numeric(19,2)` (17 dígitos inteiros), e
-  o limite deixa folga para somas sem estourar o banco. Sem ele, um valor enorme viraria erro 500.
-- **Normalização**: `"25"` e `"25.5"` são aceitos e normalizados para `"25.00"` e `"25.50"`.
-- Construtor privado, imutável. Toda operação devolve nova instância. Moedas diferentes lançam
-  `CurrencyMismatchError`; `equals` entre moedas diferentes devolve `false`.
-- Valores **negativos só existem como resultado de cálculo** (`subtract`, `negate`), nunca como
-  entrada. É assim que a `Wallet` detecta saldo insuficiente.
-- Persistência: `numeric(19,2)` + coluna `currency` (`varchar(3)`), reidratado como `Money`. No
-  ORM, o campo é `string`, e o driver devolve `numeric` como string, então o valor nunca passa por
-  `number`.
+- `WalletLedgerEntry` é imutável no domínio e append-only no banco, protegido por trigger contra `UPDATE` e `DELETE`.
+- Cada lançamento confere `balance_before ± amount = balance_after`.
+- Constraint composta exige que a moeda do lançamento seja a da wallet.
+- Há no máximo um lançamento por `(wallet_id, transaction_id)`.
+- O índice para cursor estável já existe; o endpoint de paginação ainda não está implementado.
 
-### 5.3 Wallet e WalletLedgerEntry
+## 5. Transações, idempotência e concorrência
 
-- `debit` e `credit` **devolvem o lançamento do ledger**. Saldo e ledger nascem da mesma
-  operação, então um não existe sem o outro.
-- **Valida antes de mutar**: o lançamento é criado (e a aritmética validada) antes de alterar o
-  saldo. Se algo falhar, a wallet permanece intacta.
-- `version` começa em 1 e **só incrementa quando o saldo muda**.
-- Saldo insuficiente é um erro de domínio genérico (`InsufficientFundsError`). A camada de
-  aplicação decide o `failureCode` olhando o tipo da transação (aposta sem saldo versus reversão
-  que ficaria negativa).
-- `WalletLedgerEntry` é imutável por estrutura (campos `readonly`, sem métodos de transição).
-  `create` valida `balanceBefore ± amount == balanceAfter`, valor positivo e saldo final não
-  negativo.
-- **Criação da wallet**: `Wallet.open` recebe o saldo inicial (versão 1). Quando o saldo inicial é
-  maior que zero, o caso de uso cria a transação `OPENING` (já `PROCESSED`) e o lançamento
-  `CREDIT` com `balanceBefore = 0`, **na mesma transação SQL**. Ordem de inserção: wallet,
-  transação, ledger (por causa das chaves estrangeiras).
+### Regras implementadas
 
-### 5.4 WagerTransaction
+- `BET`: debita e rejeita saldo insuficiente.
+- `WIN`: credita.
+- `LOSS`: registra a transação sem alterar saldo nem criar lançamento.
+- `REFUND`: credita uma `BET` processada, respeitando valor e referência.
+- `ROLLBACK`: aplica o movimento inverso da referência processada; saldo negativo é rejeitado com código específico.
+- `REFUND` e `ROLLBACK` sem referência são inválidos.
+- `OPENING` é reservado à criação da wallet.
+- As transições terminais e os códigos de falha ficam no domínio.
 
-- `create` **rejeita `OPENING`**: é interno e não pode vir pela API nem pela fila. A factory
-  `createOpening` existe só para uso interno.
-- Convenção do `OPENING`, compatível com as colunas `NOT NULL`: `providerId = 'system'`,
-  `externalTransactionId = <walletId>`, `idempotencyKey = 'system:opening:<walletId>'`.
-- Valores: positivos para todos os tipos, exceto `LOSS`, que aceita `0.00`.
-- `REFUND` e `ROLLBACK` exigem `referenceExternalTransactionId`. `BET` não pode ter referência.
-- `checkReference` concentra as regras de referência e **devolve** o `FailureCode` (ou
-  `undefined`), sem lançar exceção, porque é caminho de negócio, não erro de programação.
-- Transições a partir de estado terminal lançam `InvalidTransactionStateError` (erro de
-  programação).
-- `markPendingReference(nextAttemptAt)` conta a tentativa e agenda a próxima. A política (limite e
-  backoff) fica na camada de aplicação.
+### Idempotência
 
-### 5.5 Idempotência ⏳
+- SHA-256 do JSON canônico dos campos de negócio.
+- `UNIQUE (provider_id, idempotency_key)` e `UNIQUE (provider_id, external_transaction_id)` no banco.
+- Replay idêntico devolve a resposta e o saldo observado na operação original.
+- Mesma chave com payload diferente é conflito, não replay.
 
-Já decidido no schema:
+### Concorrência
 
-- `UNIQUE (provider_id, idempotency_key)`: a persistência é a fonte da verdade (nada em memória).
-- `UNIQUE (provider_id, external_transaction_id)`: a mesma transação externa não duplica, mesmo
-  com chaves diferentes.
-- A chave é escopada por provedor, então provedores diferentes não colidem.
+O lock da linha da wallet serializa operações da mesma wallet e deixa wallets distintas progredirem em paralelo. É uma garantia no banco, não um lock local da instância. Os testes exercitam disputas de saldo, hot wallet, wallets distintas e 50 submissões idênticas em paralelo; ainda falta executar o cenário com três ou mais processos/instâncias independentes.
 
-Planejado para o passo de submissão: header `Idempotency-Key` obrigatório; `payloadHash` =
-SHA-256 do JSON canônico (chaves ordenadas) apenas dos campos de negócio (`providerId`,
-`externalTransactionId`, `playerId`, `walletId`, `roundId`, `gameId`, `kind`, `money`,
-`referenceExternalTransactionId`); o header e metadados de transporte ficam fora do hash. Repetição
-idêntica devolve o resultado original com `idempotentReplay: true`; mesma chave com payload
-diferente é conflito (409 `IDEMPOTENCY_CONFLICT`).
+## 6. Inbox, consumer e outbox
 
-### 5.6 Concorrência ⏳
+### Consumer e inbox
 
-A unidade de concorrência é a `walletId`. Direção planejada: **lock pessimista por linha**
-(`SELECT ... FOR UPDATE` na wallet, dentro da transação), sem lock global. Wallets diferentes
-processam em paralelo; operações na mesma wallet se serializam. A justificativa completa
-(comparação com optimistic locking sob *hot wallet*) será registrada ao implementar.
+A fila `wager-transactions.fifo` recebe o envelope `WagerTransactionRequested`. O consumer valida a mensagem, gera hash canônico e processa com o mesmo caso de uso da API.
 
-### 5.7 Inbox e Outbox ⏳
+Na mesma transação PostgreSQL são gravados inbox, transação, wallet, ledger e outbox. A inbox usa chave `(consumer_name, message_id)`. O ACK é feito depois do commit; redelivery da mesma mensagem não repete o efeito financeiro.
 
-Direção planejada: inbox, alteração financeira, ledger e outbox na **mesma transação SQL**;
-publisher com `FOR UPDATE SKIP LOCKED` para suportar vários publishers concorrentes; `ack` do SQS
-somente após o commit. Ponto em aberto: decidir se a abertura da wallet (`OPENING`) emite
-`WalletBalanceChanged`, já que o saldo muda de 0 para o valor inicial.
+- Rejeições de negócio persistidas são terminais para a mensagem e recebem ACK.
+- Erros permanentes são enviados à DLQ.
+- Erros transitórios alteram a visibilidade para retry; a fila de entrada tem redrive configurado para cinco recebimentos.
+- No encerramento, o runner interrompe polling e devolve a visibilidade das mensagens recebidas que ainda não começaram a ser processadas.
 
-### 5.8 Autenticação
+### Outbox e publisher
 
-**Decisão: não implementar autenticação**, conforme permitido pelo desafio (não vale pontos e não
-deve competir com correção, concorrência e idempotência).
+Os eventos são persistidos junto com a operação financeira. Os tipos emitidos incluem `WagerTransactionProcessed`, `WagerTransactionRejected`, `WagerTransactionPendingReference` e `WalletBalanceChanged` quando o saldo muda.
 
-Desenho que seria adotado: integrar um Identity Provider externo (por exemplo Keycloak ou Zitadel)
-via OIDC; um `AuthGuard` validaria o JWT (assinatura via JWKS, `iss`, `aud`, expiração) e
-extrairia a identidade do provedor, que seria comparada com o `providerId` do payload
-(`ProviderIdentityPort`). Os endpoints de health ficam abertos, e as mensagens da fila são
-tratadas como canal interno confiável, mas a identidade do provedor contida na mensagem continua
-sujeita às validações de domínio.
+O publisher reivindica linhas com lease e `FOR UPDATE SKIP LOCKED`, envia à fila `wager-events.fifo`, e confirma a outbox depois da resposta do SQS. Falhas agendam retry com backoff; leases expirados podem ser retomados por outra instância. Uma queda entre o envio e a confirmação pode gerar publicação duplicada, tratada pelo consumidor downstream por idempotência.
 
-Ponto de extensão no código: um `AuthGuard` no-op documentado (a criar junto da camada de
-submissão).
+A fila de saída é distinta da fila de solicitações. A fila de eventos ainda não possui uma DLQ configurada no Compose; falhas do publisher são retentadas pela própria outbox.
 
-## 6. Modelo de dados
+## 7. HTTP e health checks
 
-Três tabelas na migration `create_core_schema`: `wallets`, `wager_transactions` e
-`wallet_ledger_entries`. Inbox e outbox terão migration própria.
+### Endpoints implementados
 
-| Garantia | Mecanismo no banco |
-|---|---|
-| Uma wallet por jogador e moeda | `UNIQUE (player_id, currency)` |
-| Saldo nunca negativo | `CHECK (balance >= 0)` |
-| Idempotência persistente | `UNIQUE (provider_id, idempotency_key)` |
-| Transação externa nunca duplicada | `UNIQUE (provider_id, external_transaction_id)` |
-| Uma referência não é revertida 2× pelo mesmo tipo | índice único **parcial** `(reference_transaction_id, kind)` onde `status = 'PROCESSED'` e `kind in ('REFUND','ROLLBACK')` |
-| Aritmética do ledger | `CHECK (balance_after = balance_before ± amount)` conforme a direção |
-| Ledger imutável | **trigger** que bloqueia `UPDATE` e `DELETE` |
-| Moeda do lançamento e da transação igual à da wallet | FK composta `(wallet_id, currency)` → `wallets(id, currency)` |
-| Um lançamento por transação em cada wallet | `UNIQUE (wallet_id, transaction_id)` |
-| `failure_code` só em `REJECTED` e `FAILED` | `CHECK ((status in ('REJECTED','FAILED')) = (failure_code is not null))` |
-| `processed_at` só em `PROCESSED` | `CHECK ((status = 'PROCESSED') = (processed_at is not null))` |
-| `REFUND` e `ROLLBACK` exigem referência | `CHECK` sobre `kind` e `reference_external_transaction_id` |
-| Valores e estados válidos | `CHECK` de `kind`, `status`, `direction`, formato de moeda e valores |
-
-Outros pontos:
-
-- Ids são `uuid`; tempos são `timestamptz`; dinheiro é `numeric(19,2)` com a moeda em coluna própria.
-- `wager_transactions` tem `reference_attempts` e `next_attempt_at` para o worker de
-  `PENDING_REFERENCE` (backoff e limite persistidos). O índice parcial
-  `(next_attempt_at) WHERE status = 'PENDING_REFERENCE'` serve a esse worker.
-- O índice `(wallet_id, created_at desc, id desc)` no ledger sustenta a paginação por cursor.
-- A convenção do `OPENING` (`system` + `walletId`) está descrita em 5.4.
-- **`TRUNCATE` não é bloqueado** de propósito, para facilitar a limpeza entre testes de
-  integração. Em produção, essa permissão seria negada ao usuário da aplicação.
-- Saldo materializado × ledger **não** é garantido por constraint (exigiria uma constraint trigger
-  diferida, pesada e frágil). Quem cobre isso é a atomicidade da transação e o endpoint de
-  reconciliação.
-
-## 7. Máquina de estados da WagerTransaction
-
-| De | Para | Quando |
+| Método | Rota | Uso |
 |---|---|---|
-| `PENDING` | `PROCESSED` | aplicada com sucesso (ou `LOSS` registrada) |
-| `PENDING` | `PENDING_REFERENCE` | referência ainda não existe |
-| `PENDING` | `REJECTED` | violação de regra de negócio |
-| `PENDING` | `FAILED` | erro permanente de infraestrutura |
-| `PENDING_REFERENCE` | `PENDING_REFERENCE` | nova tentativa sem sucesso (`attempts + 1`) |
-| `PENDING_REFERENCE` | `PROCESSED`, `REJECTED` ou `FAILED` | referência chegou, regra violada ou limite esgotado |
-| `PROCESSED`, `REJECTED`, `FAILED` | (nenhum) | estados terminais; tentar mudar é erro de programação |
+| `POST` | `/wallets` | Cria wallet e `OPENING` quando aplicável |
+| `GET` | `/wallets/:walletId` | Consulta wallet |
+| `POST` | `/wagering/transactions` | Submete transação com `Idempotency-Key` |
+| `GET` | `/wagering/transactions/:transactionId` | Consulta por ID interno |
+| `GET` | `/providers/:providerId/wagering/transactions/:externalTransactionId` | Consulta por ID externo |
+| `GET` | `/health/live` | Confirma que o processo responde |
+| `GET` | `/health/ready` | Verifica PostgreSQL e filas configuradas no SQS |
 
-## 8. Taxonomia de `failureCode`
+A readiness responde `200` quando as dependências estão disponíveis e `503` quando alguma checagem falha. A liveness não depende da saúde do banco ou do SQS.
 
-| Código | Status | Significado | Ação do provedor |
-|---|---|---|---|
-| `INSUFFICIENT_FUNDS` | `REJECTED` | aposta sem saldo | não reenviar (ou reenviar após depósito) |
-| `REVERSAL_WOULD_OVERDRAW` | `REJECTED` | reversão deixaria o saldo negativo | tratar manualmente (problema operacional, distinto de aposta sem saldo) |
-| `REFERENCE_NOT_FOUND` | `REJECTED` | a referência nunca chegou (limite esgotado) | corrigir o id, ou reenviar a referência e depois a reversão |
-| `REFERENCE_NOT_PROCESSED` | `REJECTED` | a referência foi rejeitada ou falhou | não reenviar |
-| `REFERENCE_MISMATCH` | `REJECTED` | provider, player, wallet, rodada ou moeda diferentes | corrigir o payload |
-| `INVALID_REFERENCE_KIND` | `REJECTED` | tipo de referência não permitido | corrigir o payload |
-| `AMOUNT_MISMATCH` | `REJECTED` | valor diferente do da referência | corrigir o payload |
-| `ALREADY_REVERSED` | `REJECTED` | referência já revertida por este tipo | desistir (já foi feito) |
-| `WALLET_PLAYER_MISMATCH` | `REJECTED` | a wallet não pertence ao jogador | corrigir o payload |
-| `CURRENCY_MISMATCH` | `REJECTED` | moeda diferente da moeda da wallet | corrigir o payload |
-| `UNRECOVERABLE_ERROR` | `FAILED` | falha permanente de infraestrutura | contatar suporte |
+Ainda não existem `GET /wallets/:walletId/ledger` nem `POST /wallets/:walletId/reconciliation`.
 
-## 9. API HTTP e mapeamento de status
+## 8. Testes existentes e cobertura pendente
 
-Endpoints implementados: `POST /wallets` (201), `GET /wallets/:walletId` (200), `GET /health/live`.
+### Implementados
 
-Todo erro usa o mesmo formato: `{ "error": { "code": "...", "message": "..." } }`.
+- Unitários: Money, Wallet, ledger, WagerTransaction, eventos, inbox, parser de mensagem, retry e classificação de erros.
+- Integração PostgreSQL: migrations, constraints, transações, idempotência, atomicidade e HTTP.
+- Integração PostgreSQL + LocalStack: consumer, redelivery, ACK após commit, DLQ, retry, shutdown, outbox e leases.
+- Concorrência em PostgreSQL: mesma wallet, apostas disputando saldo, wallets distintas e flooding idempotente.
 
-| Situação | HTTP | `error.code` | Estado |
-|---|---|---|---|
-| Payload ou parâmetro inválido | 400 | `INVALID_REQUEST`, `INVALID_MONEY` | ✅ |
-| Recurso inexistente | 404 | `WALLET_NOT_FOUND`, `NOT_FOUND` | ✅ |
-| Conflito de recurso | 409 | `WALLET_ALREADY_EXISTS` | ✅ |
-| Conflito de idempotência | 409 | `IDEMPOTENCY_CONFLICT` | ⏳ |
-| Rejeição por regra de negócio | 422 | `failureCode` no corpo da transação | ⏳ |
-| Aceito, processamento pendente | 202 | status `PENDING_REFERENCE` | ⏳ |
-| Falha transitória de infraestrutura | 503 | `SERVICE_UNAVAILABLE` + `Retry-After` | ⏳ |
-| Erro inesperado | 500 | `INTERNAL_ERROR` | ✅ |
+### Pendentes frente ao challenge
 
-O 409 tem dois sentidos (wallet duplicada e conflito de idempotência), então o provedor decide
-pelo `code`, nunca pela mensagem.
+- Três ou mais processos/instâncias concorrentes.
+- Reinício completo do serviço com verificação de consistência.
+- `REFUND`/`ROLLBACK` chegando antes da referência e reprocessamento pelo worker.
+- Worker de `PENDING_REFERENCE`, incluindo limite de tentativas e rejeição final.
+- Métricas e logs estruturados exigidos pelo challenge.
+- Testes dos endpoints de health.
 
-Decisões da camada HTTP:
+## 9. Decisões, trade-offs e limitações conhecidas
 
-- **Validação manual do corpo**, sem `class-validator`. São poucos campos, e a validade do dinheiro
-  é responsabilidade única do `Money`, então não há regras duplicadas nem dependência extra.
-- **UUIDs validados na borda** (body e parâmetros de rota). Um valor malformado chegaria ao
-  PostgreSQL como erro de tipo e viraria 500. O `playerId` é normalizado para minúsculas.
-- **Filtro global de exceções com tabela explícita** de erros de domínio. Um erro de domínio
-  **não mapeado vira 500 e é logado**, em vez de ser classificado errado em silêncio. A resposta
-  nunca expõe detalhes internos.
-- Erros do próprio Nest (rota inexistente, JSON malformado, id inválido) passam pelo mesmo filtro e
-  saem no mesmo formato.
+- `bigint` em centavos evita erro de ponto flutuante e assume escala de duas casas.
+- Entities ORM separadas do domínio aumentam mapeamento, mantendo domínio independente.
+- Escritas usam `em.insert`/operações SQL explícitas para tornar persistência previsível.
+- O ledger é protegido por trigger; a igualdade global saldo/ledger depende da atomicidade e de reconciliação, ainda sem endpoint.
+- A migration atual permite apenas uma reversão processada por transação referenciada, considerando `REFUND` e `ROLLBACK` juntos. Isso é mais restritivo que a regra do challenge, que fala em não repetir o mesmo tipo de reversão; confirmar a interpretação antes da entrega.
+- Autenticação não foi implementada, como permitido pelo challenge. O desenho adotado é integrar um Identity Provider externo por OIDC; o guard/ponto de extensão ainda precisa ser explicitado no código.
+- Logging existe, mas ainda não é JSON estruturado com todos os IDs exigidos. Métricas de negócio e infraestrutura ainda não foram adicionadas.
 
-## 10. Interpretações das regras de negócio
+## 10. Próximos passos
 
-O desafio pede que interpretações adicionais sejam documentadas:
-
-- `"25"` e `"25.5"` são aceitos e normalizados para duas casas (o desafio só proíbe mais de 2).
-- `LOSS` aceita valor `0.00`; os demais tipos exigem valor positivo (o ledger não aceita
-  lançamento zerado).
-- `WIN` referenciando uma `BET` **não** compara valores (o prêmio pode ser diferente da aposta). A
-  igualdade de valor só vale para `REFUND` e `ROLLBACK`.
-- `ROLLBACK` produz o lançamento **inverso** da referência: desfazer `BET` ou `REFUND` credita ou
-  debita conforme o caso, e desfazer `WIN` debita.
-- Referência ainda `PENDING` ou `PENDING_REFERENCE` significa **esperar**; referência terminal não
-  processada (`REJECTED` ou `FAILED`) gera `REFERENCE_NOT_PROCESSED`.
-- Saldo inicial zero cria apenas a wallet, sem transação `OPENING` nem lançamento.
-- Ledger de partidas dobradas não foi implementado (diferencial opcional).
-
-## 11. Estratégia de testes
-
-- **Unitários** (`bun run test:unit`): `Money`, `Wallet`, `WalletLedgerEntry` e `WagerTransaction`,
-  sem I/O.
-- **Integração** (`bun run test:integration`): PostgreSQL **real**, no banco `wallet_test` (criado
-  uma vez, separado do de desenvolvimento). As migrations rodam via `orm.migrator.up()` e a limpeza
-  entre testes usa `TRUNCATE`.
-  - Trava de segurança: o helper se recusa a rodar em banco cujo nome não termine em `_test`.
-  - Teste de **atomicidade**: uma falha ao gravar o ledger desfaz wallet e `OPENING`.
-  - Testes HTTP sobem a aplicação real (Nest + HTTP + banco de teste) numa porta aleatória e
-    chamam os endpoints com `fetch`. Montamos um módulo de teste em vez de importar o `AppModule`
-    para não gravar no banco de desenvolvimento por acidente.
-- Consultas com valores usam **parâmetros** (`?`), nunca interpolação. O SQL cru devolve datas como
-  string; datas lidas via entity chegam como `Date` (coberto por teste de repositório).
-- ⏳ Concorrência, falhas e multi-instância: previstos para depois da submissão de transações.
-- Invariante final dos testes financeiros: `wallet.balance == saldo reconstruído pelo ledger`.
-
-## 12. Infraestrutura local
-
-- **PostgreSQL 17** com *healthcheck*.
-- **LocalStack com SQS**, na versão **4.14 fixada**: as versões mais recentes da imagem exigem
-  conta e token de autenticação. A 4.14 sobe sem token (verificado no ambiente de
-  desenvolvimento). Alternativa aceita pelo desafio: MiniStack.
-- Filas criadas por script de inicialização (`infra/localstack/init/01-queues.sh`), executado quando
-  o LocalStack fica pronto:
-  - `wager-transactions.fifo`, com `VisibilityTimeout` de 30 s e `RedrivePolicy` com
-    `maxReceiveCount = 5`;
-  - `wager-transactions-dlq.fifo`, como destino das mensagens que esgotam as tentativas.
-- O limite de 5 tentativas é decisão nossa: absorve falhas transitórias sem repetir indefinidamente
-  uma mensagem que não será processada.
-- Scripts `.sh` devem ter final de linha **LF** (`.gitattributes` força `*.sh text eol=lf`), senão
-  falham dentro do container Linux.
-- O endpoint do SQS no `.env` usa `http://localhost:4566`, sem depender de DNS externo.
-
-## 13. Trade-offs
-
-- **Records do ORM separados do domínio**: mais arquivos e mapeamento explícito, em troca de domínio
-  puro e testável sem banco.
-- **`bigint` em centavos**: simples e exato, mas assume escala fixa de 2 casas. Moedas com outra
-  escala (JPY, KWD) exigiriam parametrizar o fator por moeda.
-- **`em.insert` em vez de `persist`/`flush`**: SQL previsível e sem efeitos implícitos, mas sem os
-  benefícios do identity map para escritas.
-- **Validação manual do corpo**: poucas dependências e regras sem duplicação, mas é um parser
-  escrito à mão que precisa de testes (cobertos pelos testes HTTP).
-- **Migrations em SQL manual**: controle total de constraints, triggers e índices parciais, mas
-  sem diff automático.
-- **Ledger imutável por trigger**: a proteção vale para qualquer cliente do banco, ao custo de um
-  trigger por linha em cada inserção/alteração negada.
-
-## 14. Limitações conhecidas
-
-- `Money.from` aplica o limite de 15 dígitos também na reidratação. Um saldo acima disso (na
-  prática inalcançável) não seria lido.
-- Somas sucessivas podem, teoricamente, ultrapassar `numeric(19,2)`. O limite de entrada dá folga
-  grande, mas não elimina o caso.
-- Saldo × ledger não é garantido por constraint, e sim por atomicidade e reconciliação.
-- `TRUNCATE` não é bloqueado no schema (necessário para testes); em produção seria negado por
-  permissão.
-- Leituras via `EntityManager` exigem contexto de requisição. Workers e o consumer SQS precisarão
-  criá-lo explicitamente.
-- Falhas transitórias de infraestrutura ainda não são mapeadas para 503 (previsto junto da
-  submissão de transações).
-- Sem autenticação (ver 5.8) e sem ledger de partidas dobradas.
+1. Implementar worker de `PENDING_REFERENCE` e cobrir referências fora de ordem.
+2. Implementar consulta paginada do ledger e reconciliação.
+3. Completar testes multi-instância, reinício e health.
+4. Adicionar métricas e logs estruturados.
+5. Atualizar/validar a política de reversões frente ao requisito.
+6. Completar a extensão de autenticação e manter o README alinhado ao uso real.
