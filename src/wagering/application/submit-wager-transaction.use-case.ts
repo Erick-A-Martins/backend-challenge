@@ -125,25 +125,72 @@ export class SubmitWagerTransactionUseCase {
             const entry = await this.process(wallet, transaction, now);
             transaction.recordObservedBalance(wallet.balance);
 
-            // 4) Eventos de integração: nascem na mesma transação SQL da mudança financeira.
-            const events = buildTransactionEvents({
-                transaction,
-                wallet,
-                entry,
-                context: { correlationId, causationId: transaction.id, occurredAt: now },
-                nextEventId: () => this.ids.next(),
-            });
-
-            // 5) Grava tudo atomicamente (ordem imposta pelas chaves estrangeiras).
-            await this.transactions.insert(transaction);
-            if (entry) {
-                await this.wallets.update(wallet);
-                await this.ledger.append(entry);
-            }
-            await this.outbox.append(events.map((event) => OutboxMessage.enqueue(event)));
+            await this.persistTransition(transaction, wallet, entry, now, correlationId, true);
 
             return this.toResult(transaction, false);
         });
+    }
+
+    /** Reavalia uma transação pendente dentro da transação que já está ativa no worker. */
+    async retryPendingReference(transactionId: string): Promise<boolean> {
+        return this.unitOfWork.run(async () => {
+            const transaction = await this.transactions.findByIdForUpdate(transactionId);
+            if (
+                !transaction ||
+                transaction.status !== WagerTransactionStatus.PendingReference ||
+                transaction.nextAttemptAt === undefined
+            ) {
+                return false;
+            }
+
+            const now = this.clock.now();
+            if (transaction.nextAttemptAt.getTime() > now.getTime()) {
+                return false;
+            }
+
+            const wallet = await this.wallets.findByIdForUpdate(transaction.walletId);
+            if (!wallet) {
+                throw new WalletNotFoundError(transaction.walletId);
+            }
+
+            const entry = await this.process(wallet, transaction, now);
+            transaction.recordObservedBalance(wallet.balance);
+
+            // O correlationId original não é persistido; o ID estável da transação mantém a correlação.
+            await this.persistTransition(transaction, wallet, entry, now, transaction.id, false);
+            return true;
+        });
+    }
+
+    private async persistTransition(
+        transaction: WagerTransaction,
+        wallet: Wallet,
+        entry: WalletLedgerEntry | undefined,
+        now: Date,
+        correlationId: string,
+        isNew: boolean,
+    ): Promise<void> {
+        const events = buildTransactionEvents({
+            transaction,
+            wallet,
+            entry,
+            context: { correlationId, causationId: transaction.id, occurredAt: now },
+            nextEventId: () => this.ids.next(),
+        });
+
+        // A transação precisa existir antes do ledger por causa da foreign key.
+        if (isNew) {
+            await this.transactions.insert(transaction);
+        } else {
+            await this.transactions.update(transaction);
+        }
+
+        if (entry) {
+            await this.wallets.update(wallet);
+            await this.ledger.append(entry);
+        }
+
+        await this.outbox.append(events.map((event) => OutboxMessage.enqueue(event)));
     }
 
     private toResult(tx: WagerTransaction, idempotentReplay: boolean): SubmitWagerTransactionResult {
@@ -181,8 +228,19 @@ export class SubmitWagerTransactionUseCase {
                 tx.referenceExternalTransactionId,
             );
 
-            if (found === null || found.status === WagerTransactionStatus.PendingReference) {
-                tx.markPendingReference(ReferenceRetryPolicy.nextAttemptAt(now, tx.referenceAttempts + 1));
+            if (
+                found === null ||
+                found.status === WagerTransactionStatus.Pending ||
+                found.status === WagerTransactionStatus.PendingReference
+            ) {
+                const nextAttempt = tx.referenceAttempts + 1;
+                if (ReferenceRetryPolicy.isExhausted(nextAttempt)) {
+                    // Registra também a última consulta antes de tornar o resultado terminal.
+                    tx.markPendingReference(now);
+                    tx.reject(FailureCode.ReferenceNotFound);
+                } else {
+                    tx.markPendingReference(ReferenceRetryPolicy.nextAttemptAt(now, nextAttempt));
+                }
                 return undefined;
             }
 

@@ -57,6 +57,8 @@ As variáveis principais estão em `.env.example`:
 | `SQS_DLQ_URL` | Dead-letter queue das solicitações |
 | `SQS_EVENTS_QUEUE_URL` | Fila FIFO de eventos publicados pela outbox |
 | `WORKERS_ENABLED` | Ativa ou desativa os workers de mensageria |
+| `REFERENCE_RETRY_BATCH_SIZE` | Máximo de referências pendentes por rodada do worker |
+| `REFERENCE_RETRY_POLL_MS` | Intervalo entre rodadas do worker de referências |
 | `PORT` | Porta HTTP da API |
 
 As credenciais `test` são apenas para o LocalStack. Não use esses valores em AWS.
@@ -132,6 +134,8 @@ O consumer lê mensagens `WagerTransactionRequested` da fila de solicitações. 
 
 Eventos como `WagerTransactionProcessed`, `WagerTransactionRejected`, `WagerTransactionPendingReference` e `WalletBalanceChanged` são gravados na outbox junto com a transação. O publisher envia os eventos à fila `wager-events.fifo`. O SQS pode entregar ou publicar novamente; a inbox e as chaves persistentes são as garantias de idempotência.
 
+O worker de referências busca `PENDING_REFERENCE` vencidas. Ele reavalia `REFUND` e `ROLLBACK` pelas mesmas regras do processamento normal, aguarda referências ainda pendentes e rejeita com `REFERENCE_NOT_FOUND` após oito consultas totais. O intervalo usa backoff de 5 segundos até 5 minutos.
+
 ## Testes
 
 Suba PostgreSQL e LocalStack antes dos testes de integração. O helper aplica as migrations e recusa conexões a bancos cujo nome não termine em `_test`.
@@ -160,7 +164,7 @@ bun run migration:create
 ## Limitações atuais
 
 - Não há autenticação; a decisão e o desenho futuro estão descritos em `ARCHITECTURE.md`.
-- Ainda não há worker para reprocessar transações `PENDING_REFERENCE`.
 - Ainda não há endpoint de consulta paginada do ledger nem de reconciliação.
+- Ainda faltam testes de integração dedicados ao worker de referências pendentes.
 - Ainda não há métricas de aplicação; elas seguem pendentes.
 - Os testes atuais não comprovam execução em três ou mais processos independentes nem reinício completo do serviço.
